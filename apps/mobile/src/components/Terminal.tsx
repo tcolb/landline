@@ -8,6 +8,7 @@
 
 import {
   Canvas,
+  FontStyle,
   matchFont,
   Picture,
   SkFont,
@@ -48,7 +49,6 @@ const FONT_SIZE = 12;
 interface FontInfo {
   font: SkFont;
   boldFont: SkFont;
-  emojiFont: SkFont;
   cellW: number;
   cellH: number;
   baseline: number;
@@ -59,17 +59,10 @@ function getFontInfo(): FontInfo {
     const fontFamily = Platform.select({ ios: "Menlo", default: "monospace" });
     const font = matchFont({ fontFamily, fontSize: FONT_SIZE });
     const boldFont = matchFont({ fontFamily, fontSize: FONT_SIZE, fontWeight: "bold" });
-    // Monospace fonts have no emoji glyphs and Skia does no automatic
-    // fallback — emoji cells get their own font.
-    const emojiFont = matchFont({
-      fontFamily: Platform.select({ ios: "Apple Color Emoji", default: "Noto Color Emoji" }),
-      fontSize: FONT_SIZE,
-    });
     const metrics = font.getMetrics();
     fontInfo = {
       font,
       boldFont,
-      emojiFont,
       cellW: font.getTextWidth("0"),
       cellH: Math.ceil(-metrics.ascent + metrics.descent),
       baseline: Math.ceil(-metrics.ascent),
@@ -78,14 +71,37 @@ function getFontInfo(): FontInfo {
   return fontInfo;
 }
 
-function isEmoji(t: string): boolean {
+// Glyph fallback: monospace fonts miss plenty (emoji, ⏵, ❯, CJK) and Skia
+// does no automatic substitution. For any grapheme the main font lacks a
+// glyph for, probe candidate families for real coverage; cached per
+// codepoint. Codepoints below U+2500 are assumed covered (fast path —
+// ASCII, Latin, punctuation; box drawing above that renders as rects).
+const FALLBACK_FAMILIES: string[] = Platform.select({
+  ios: ["Apple Symbols", "Apple Color Emoji", "Hiragino Sans", "Helvetica"],
+  default: ["sans-serif", "Noto Color Emoji", "Noto Sans CJK SC"],
+})!;
+const glyphCache = new Map<number, SkFont | null>(); // null = main font is fine
+function fontForGlyph(t: string): SkFont | null {
   const cp = t.codePointAt(0) ?? 0;
-  return (
-    cp >= 0x1f000 ||
-    (cp >= 0x2600 && cp <= 0x27bf) ||
-    t.includes("️") ||
-    cp === 0x2764
-  );
+  if (cp < 0x2500) return null;
+  const cached = glyphCache.get(cp);
+  if (cached !== undefined) return cached;
+  const { font } = getFontInfo();
+  let result: SkFont | null = null;
+  if (font.getGlyphIDs(t, 1)[0] === 0) {
+    const mgr = Skia.FontMgr.System();
+    for (const family of FALLBACK_FAMILIES) {
+      const typeface = mgr.matchFamilyStyle(family, FontStyle.Normal);
+      if (!typeface) continue;
+      const candidate = Skia.Font(typeface, FONT_SIZE);
+      if (candidate.getGlyphIDs(t, 1)[0] !== 0) {
+        result = candidate;
+        break;
+      }
+    }
+  }
+  glyphCache.set(cp, result);
+  return result;
 }
 
 // Block elements (U+2580–U+259F) drawn as glyphs leave seams and stray
@@ -181,7 +197,6 @@ export function Terminal({ cfg, session, onBack }: Props) {
     const {
       font,
       boldFont,
-      emojiFont,
       cellW: CELL_W,
       cellH: CELL_H,
       baseline: BASELINE,
@@ -262,9 +277,10 @@ export function Terminal({ cfg, session, onBack }: Props) {
           flush();
           continue;
         }
-        if (isEmoji(t)) {
+        const fallback = fontForGlyph(t);
+        if (fallback) {
           flush();
-          canvas.drawText(t, x * CELL_W, baseY, paintFor(color), emojiFont);
+          canvas.drawText(t, x * CELL_W, baseY, paintFor(color), fallback);
           continue;
         }
         if ((color !== runColor || bold !== runBold) && run !== "") flush();
