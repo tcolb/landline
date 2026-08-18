@@ -153,6 +153,15 @@ control-mode dialect so terminals that already speak it can attach natively.
    view = `@shopify/react-native-skia` cell grid fed by snapshot/diff stream,
    input incl. special-keys bar (Esc/Tab/Ctrl/arrows).
 
+   **Core tenet: native-first UI.** Outside the terminal canvas (inherently
+   custom drawing), each platform's app should look and feel native to that
+   platform — platform UI components (SwiftUI-backed on iOS,
+   Compose-backed on Android, e.g. via `@expo/ui`), native navigation
+   stacks and transitions, system colors/dynamic type, platform-idiomatic
+   lists, context menus, and haptics. Custom-styled generic views are the
+   fallback, not the default; a screen that could be a native form or
+   grouped list should be one.
+
 ### Key concepts
 
 - **Session**: environment × harness × interface — an execution environment,
