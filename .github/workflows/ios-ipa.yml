@@ -23,6 +23,10 @@ jobs:
   release:
     runs-on: macos-15
     timeout-minutes: 90
+    env:
+      # Fixed path so the compiler cache is restorable across runs; the RN
+      # wrapper patch below exports the same dir.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
     defaults:
       run:
         working-directory: apps/mobile
@@ -52,8 +56,66 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/mobile/pnpm-lock.yaml
 
+      # --- Cache restore (all refs; only main writes below, so branches get
+      # a warm read-only start without thrashing the shared cache budget) ---
+      - name: Restore CocoaPods
+        id: restore-pods
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-ios-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}
+          restore-keys: pods-ios-
+
+      # Compiler cache — the actual native-compile speedup. One entry for
+      # this job's device+simulator compiles ("release" flavor); the dev job
+      # keeps its own ("dev": Debug objects differ wholesale).
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-ios-release-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-ios-release-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}-
+            ccache-ios-release-
+
+      # Before pod install so RN's Podfile (apple.ccacheEnabled via
+      # expo-build-properties) wires CC to its ccache wrappers.
+      - name: Install ccache
+        run: |
+          command -v ccache >/dev/null || brew install ccache
+          ccache -z
+
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
+
+      # Xcode 26 leaves $CCACHE_BINARY empty in RN's wrapper scripts; pin the
+      # real binary and cache dir into them.
+      - name: Route ccache (patch RN wrapper)
+        run: |
+          set -euo pipefail
+          CCACHE_BIN="$(command -v ccache)"
+          count=0
+          patch() {
+            local w="$1"
+            [ -f "$w" ] || return 0
+            grep -q 'LANDLINE_CCACHE_FIX' "$w" && return 0
+            local tmp; tmp="$(mktemp)"
+            awk -v bin="$CCACHE_BIN" -v dir="$CCACHE_DIR" '
+              /^exec / && !ins {
+                print "export CCACHE_DIR=\"" dir "\"  # LANDLINE_CCACHE_FIX"
+                print "export CCACHE_MAXSIZE=3G"
+                sub(/\$CCACHE_BINARY/, bin)
+                ins=1
+              }
+              { print }
+            ' "$w" > "$tmp"
+            chmod +x "$tmp"; mv "$tmp" "$w"
+            echo "patched $w"; count=$((count + 1))
+          }
+          RN="$(node -e "console.log(require('path').dirname(require.resolve('react-native/package.json')))")"
+          patch "$RN/scripts/xcode/ccache-clang.sh"
+          patch "$RN/scripts/xcode/ccache-clang++.sh"
+          [ "$count" -gt 0 ] || { echo "ERROR: no RN ccache wrapper found"; exit 1; }
 
       - name: Generate the native iOS project
         run: pnpm exec expo prebuild --platform ios --no-install
@@ -152,6 +214,27 @@ jobs:
             apps/mobile/mock-daemon.log
           if-no-files-found: ignore
 
+      - name: Report ccache stats
+        if: always()
+        run: ccache -s -v 2>/dev/null || ccache -s
+
+      # Only main persists caches: one authoritative warm entry instead of a
+      # per-branch pile LRU-evicting it. Pods can't overwrite an existing
+      # key, so its save is gated on a restore miss.
+      - name: Save ccache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-ios-release-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}-${{ github.sha }}
+
+      - name: Save CocoaPods
+        if: github.ref == 'refs/heads/main' && steps.restore-pods.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-ios-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}
+
       - uses: actions/upload-artifact@v4
         with:
           name: landline-ipa
@@ -160,6 +243,8 @@ jobs:
   dev:
     runs-on: macos-15
     timeout-minutes: 90
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
     defaults:
       run:
         working-directory: apps/mobile
@@ -186,8 +271,56 @@ jobs:
           cache: pnpm
           cache-dependency-path: apps/mobile/pnpm-lock.yaml
 
+      - name: Restore CocoaPods
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-ios-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}
+          restore-keys: pods-ios-
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-ios-dev-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            ccache-ios-dev-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}-
+            ccache-ios-dev-
+
+      - name: Install ccache
+        run: |
+          command -v ccache >/dev/null || brew install ccache
+          ccache -z
+
       - name: Install JS dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Route ccache (patch RN wrapper)
+        run: |
+          set -euo pipefail
+          CCACHE_BIN="$(command -v ccache)"
+          count=0
+          patch() {
+            local w="$1"
+            [ -f "$w" ] || return 0
+            grep -q 'LANDLINE_CCACHE_FIX' "$w" && return 0
+            local tmp; tmp="$(mktemp)"
+            awk -v bin="$CCACHE_BIN" -v dir="$CCACHE_DIR" '
+              /^exec / && !ins {
+                print "export CCACHE_DIR=\"" dir "\"  # LANDLINE_CCACHE_FIX"
+                print "export CCACHE_MAXSIZE=3G"
+                sub(/\$CCACHE_BINARY/, bin)
+                ins=1
+              }
+              { print }
+            ' "$w" > "$tmp"
+            chmod +x "$tmp"; mv "$tmp" "$w"
+            echo "patched $w"; count=$((count + 1))
+          }
+          RN="$(node -e "console.log(require('path').dirname(require.resolve('react-native/package.json')))")"
+          patch "$RN/scripts/xcode/ccache-clang.sh"
+          patch "$RN/scripts/xcode/ccache-clang++.sh"
+          [ "$count" -gt 0 ] || { echo "ERROR: no RN ccache wrapper found"; exit 1; }
 
       - name: Generate the native iOS project (dev variant)
         run: APP_VARIANT=dev pnpm exec expo prebuild --platform ios --no-install
@@ -235,6 +368,17 @@ jobs:
           rm -rf Payload out && mkdir -p Payload out
           cp -R "$APP" Payload/
           zip -qry out/landline-dev.ipa Payload
+
+      - name: Report ccache stats
+        if: always()
+        run: ccache -s -v 2>/dev/null || ccache -s
+
+      - name: Save ccache
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-ios-dev-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}-${{ github.sha }}
 
       - uses: actions/upload-artifact@v4
         with:
