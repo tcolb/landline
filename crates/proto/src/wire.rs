@@ -197,7 +197,7 @@ pub struct RowData {
     pub cells: Vec<CellData>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Cursor {
     pub x: u16,
     pub y: u16,

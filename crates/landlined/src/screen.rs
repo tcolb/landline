@@ -32,6 +32,10 @@ pub struct GhosttyScreen {
     state: RenderState<'static>,
     rows_iter: RowIterator<'static>,
     cells_iter: CellIterator<'static>,
+    /// Cursor as of the last emitted frame. Writing a blank over a blank
+    /// leaves every row clean, so a bare cursor move (typing a space at a
+    /// prompt) would otherwise never produce a diff.
+    last_cursor: Option<Cursor>,
 }
 
 // SAFETY: libghostty-vt types are !Send because the underlying library is
@@ -52,6 +56,7 @@ impl GhosttyScreen {
             state: RenderState::new().map_err(|e| anyhow::anyhow!("render state: {e:?}"))?,
             rows_iter: RowIterator::new().map_err(|e| anyhow::anyhow!("row iter: {e:?}"))?,
             cells_iter: CellIterator::new().map_err(|e| anyhow::anyhow!("cell iter: {e:?}"))?,
+            last_cursor: None,
         })
     }
 
@@ -161,6 +166,7 @@ impl Screen for GhosttyScreen {
                 let lines =
                     Self::collect_rows(&mut self.rows_iter, &mut self.cells_iter, &snap, false);
                 let cursor = Self::cursor(&snap);
+                self.last_cursor = Some(cursor);
                 Frame::Snapshot {
                     rows,
                     cols,
@@ -215,12 +221,24 @@ impl Screen for GhosttyScreen {
         let snap = self.state.update(&self.term).ok()?;
         let dirty = snap.dirty().ok()?;
         match dirty {
-            Dirty::Clean => None,
+            Dirty::Clean => {
+                let cursor = Self::cursor(&snap);
+                if self.last_cursor == Some(cursor) {
+                    return None;
+                }
+                self.last_cursor = Some(cursor);
+                Some(Frame::Diff {
+                    lines: Vec::new(),
+                    cursor,
+                    mouse,
+                })
+            }
             Dirty::Partial => {
                 let _ = snap.set_dirty(Dirty::Clean);
                 let lines =
                     Self::collect_rows(&mut self.rows_iter, &mut self.cells_iter, &snap, true);
                 let cursor = Self::cursor(&snap);
+                self.last_cursor = Some(cursor);
                 if lines.is_empty() {
                     // Cursor-only change.
                     Some(Frame::Diff {
@@ -241,6 +259,7 @@ impl Screen for GhosttyScreen {
                 let lines =
                     Self::collect_rows(&mut self.rows_iter, &mut self.cells_iter, &snap, false);
                 let cursor = Self::cursor(&snap);
+                self.last_cursor = Some(cursor);
                 let (rows, cols) = (snap.rows().unwrap_or(0), snap.cols().unwrap_or(0));
                 Some(Frame::Snapshot {
                     rows,
@@ -310,6 +329,26 @@ mod tests {
         for y in 0..3 {
             assert_eq!(row_text(&a, y), row_text(&b, y), "row {y} differs");
         }
+    }
+
+    #[test]
+    fn cursor_only_movement_produces_a_diff() {
+        let mut s = GhosttyScreen::new(24, 80, 100).unwrap();
+        s.write(b"prompt$ ");
+        let _ = s.snapshot(); // clears dirty state, records cursor
+        assert!(s.diff().is_none(), "clean screen must not diff");
+        // Move the cursor without changing any cell content.
+        s.write(b"\x1b[5;10H");
+        let frame = s.diff().expect("cursor move must produce a frame");
+        match frame {
+            Frame::Diff { cursor, .. } => {
+                assert_eq!((cursor.x, cursor.y), (9, 4));
+            }
+            Frame::Snapshot { cursor, .. } => {
+                assert_eq!((cursor.x, cursor.y), (9, 4));
+            }
+        }
+        assert!(s.diff().is_none(), "no second diff without further change");
     }
 
     #[test]

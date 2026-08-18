@@ -48,6 +48,7 @@ const FONT_SIZE = 12;
 interface FontInfo {
   font: SkFont;
   boldFont: SkFont;
+  emojiFont: SkFont;
   cellW: number;
   cellH: number;
   baseline: number;
@@ -58,16 +59,33 @@ function getFontInfo(): FontInfo {
     const fontFamily = Platform.select({ ios: "Menlo", default: "monospace" });
     const font = matchFont({ fontFamily, fontSize: FONT_SIZE });
     const boldFont = matchFont({ fontFamily, fontSize: FONT_SIZE, fontWeight: "bold" });
+    // Monospace fonts have no emoji glyphs and Skia does no automatic
+    // fallback — emoji cells get their own font.
+    const emojiFont = matchFont({
+      fontFamily: Platform.select({ ios: "Apple Color Emoji", default: "Noto Color Emoji" }),
+      fontSize: FONT_SIZE,
+    });
     const metrics = font.getMetrics();
     fontInfo = {
       font,
       boldFont,
+      emojiFont,
       cellW: font.getTextWidth("0"),
       cellH: Math.ceil(-metrics.ascent + metrics.descent),
       baseline: Math.ceil(-metrics.ascent),
     };
   }
   return fontInfo;
+}
+
+function isEmoji(t: string): boolean {
+  const cp = t.codePointAt(0) ?? 0;
+  return (
+    cp >= 0x1f000 ||
+    (cp >= 0x2600 && cp <= 0x27bf) ||
+    t.includes("️") ||
+    cp === 0x2764
+  );
 }
 
 // Block elements (U+2580–U+259F) drawn as glyphs leave seams and stray
@@ -160,7 +178,14 @@ export function Terminal({ cfg, session, onBack }: Props) {
   }, []);
 
   const repaintInner = useCallback(() => {
-    const { font, boldFont, cellW: CELL_W, cellH: CELL_H, baseline: BASELINE } = getFontInfo();
+    const {
+      font,
+      boldFont,
+      emojiFont,
+      cellW: CELL_W,
+      cellH: CELL_H,
+      baseline: BASELINE,
+    } = getFontInfo();
     const rows = grid.current.length;
     if (rows === 0) return;
     const cols = grid.current[0]?.length ?? 0;
@@ -235,6 +260,11 @@ export function Terminal({ cfg, session, onBack }: Props) {
           )
         ) {
           flush();
+          continue;
+        }
+        if (isEmoji(t)) {
+          flush();
+          canvas.drawText(t, x * CELL_W, baseY, paintFor(color), emojiFont);
           continue;
         }
         if ((color !== runColor || bold !== runBold) && run !== "") flush();
@@ -412,7 +442,15 @@ export function Terminal({ cfg, session, onBack }: Props) {
         {key("↑", "\x1b[A")}
         {key("→", "\x1b[C")}
         {key("⌫", "\x7f")}
-        <Pressable style={styles.key} onPress={() => Keyboard.dismiss()}>
+        <Pressable
+          style={styles.key}
+          onPress={() => {
+            // Dismissing alone is unreliable while the hidden input holds
+            // focus; blur it explicitly first.
+            inputRef.current?.blur();
+            Keyboard.dismiss();
+          }}
+        >
           <Text style={styles.keyText}>⌄⌨</Text>
         </Pressable>
       </View>
