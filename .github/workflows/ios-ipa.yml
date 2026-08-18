@@ -21,14 +21,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The Expo JSI package needs Swift tools 6.2+; the image default lags.
-      - name: Select newest Xcode
+      # The Expo JSI package needs Swift tools >= 6.2, but the newest
+      # Swift on the image breaks its source; pin to a 6.2 toolchain.
+      - name: Select Xcode with Swift 6.2
         run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
-          echo "using $XCODE"
-          sudo xcode-select -s "$XCODE"
+          PICK=""
+          for x in /Applications/Xcode_*.app; do
+            v=$("$x"/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift --version 2>/dev/null | head -1)
+            echo "$x -> $v"
+            case "$v" in *"Swift version 6.2"*) PICK="$x";; esac
+          done
+          if [ -z "$PICK" ]; then
+            echo "no Swift 6.2 toolchain found; falling back to newest"
+            PICK=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          fi
+          echo "using $PICK"
+          sudo xcode-select -s "$PICK"
           xcodebuild -version
-          swift --version
 
       - uses: pnpm/action-setup@v4
         with:
