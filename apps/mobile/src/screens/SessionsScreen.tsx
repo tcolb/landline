@@ -1,14 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
-import {
-  FlatList,
-  Pressable,
-  RefreshControl,
-  StyleSheet,
-  Text,
-  View,
-} from "react-native";
-import { ConnectionConfig, ControlConn, watchEvents } from "../client";
+import { LegendList } from "@legendapp/list/react-native";
+import { useMutation } from "@tanstack/react-query";
+import React from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ConnectionConfig } from "../client";
 import { SessionInfo } from "../proto";
+import { killSession, useSessions } from "../sessions";
 
 interface Props {
   cfg: ConnectionConfig;
@@ -18,57 +14,11 @@ interface Props {
 }
 
 export function SessionsScreen({ cfg, onOpen, onSpawn, onDisconnect }: Props) {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState("");
-  const conn = useRef<ControlConn | null>(null);
-
-  const refresh = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      if (!conn.current) conn.current = await ControlConn.open(cfg);
-      setSessions(await conn.current.ls());
-      setError("");
-    } catch (e: any) {
-      conn.current = null;
-      setError(String(e.message ?? e));
-    } finally {
-      setRefreshing(false);
-    }
-  }, [cfg]);
-
-  // Live list: watch events patch state; ls covers the initial load.
-  useEffect(() => {
-    refresh();
-    let closer: { close(): void } | null = null;
-    let alive = true;
-    watchEvents(cfg, (ev) => {
-      setSessions((prev) => {
-        const rest = prev.filter((s) => s.id !== ev.info.id);
-        return [...rest, ev.info].sort((a, b) => a.id.localeCompare(b.id));
-      });
-    })
-      .then((c) => {
-        if (!alive) c.close();
-        else closer = c;
-      })
-      .catch(() => {});
-    return () => {
-      alive = false;
-      closer?.close();
-      conn.current?.close();
-      conn.current = null;
-    };
-  }, [cfg, refresh]);
-
-  const kill = async (s: SessionInfo) => {
-    try {
-      if (!conn.current) conn.current = await ControlConn.open(cfg);
-      await conn.current.kill(s.id);
-    } catch (e: any) {
-      setError(String(e.message ?? e));
-    }
-  };
+  const sessions = useSessions(cfg);
+  const kill = useMutation({
+    mutationFn: (id: string) => killSession(cfg, id),
+    // No cache surgery needed: the watch event patches the list.
+  });
 
   const renderItem = ({ item }: { item: SessionInfo }) => {
     const running = item.status.state === "running";
@@ -85,13 +35,18 @@ export function SessionsScreen({ cfg, onOpen, onSpawn, onDisconnect }: Props) {
           </Text>
         </View>
         {running && (
-          <Pressable style={styles.killBtn} onPress={() => kill(item)}>
+          <Pressable style={styles.killBtn} onPress={() => kill.mutate(item.id)}>
             <Text style={styles.killText}>kill</Text>
           </Pressable>
         )}
       </Pressable>
     );
   };
+
+  const error =
+    (sessions.error as Error | null)?.message ??
+    (kill.error as Error | null)?.message ??
+    "";
 
   return (
     <View style={styles.root}>
@@ -107,13 +62,18 @@ export function SessionsScreen({ cfg, onOpen, onSpawn, onDisconnect }: Props) {
         </View>
       </View>
       {error !== "" && <Text style={styles.error}>{error}</Text>}
-      <FlatList
-        data={sessions}
-        keyExtractor={(s) => s.id}
+      <LegendList
+        data={sessions.data ?? []}
+        keyExtractor={(s: SessionInfo) => s.id}
         renderItem={renderItem}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        estimatedItemSize={58}
+        recycleItems
+        onRefresh={() => sessions.refetch()}
+        refreshing={sessions.isFetching}
         ListEmptyComponent={
-          <Text style={[styles.dim, styles.empty]}>no sessions — spawn one</Text>
+          <Text style={[styles.dim, styles.empty]}>
+            {sessions.isLoading ? "loading…" : "no sessions — spawn one"}
+          </Text>
         }
       />
     </View>

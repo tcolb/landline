@@ -1,4 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
 import { SafeAreaView, ScrollView, StyleSheet, Text } from "react-native";
@@ -7,6 +7,9 @@ import { SessionInfo } from "./src/proto";
 import { ConnectScreen } from "./src/screens/ConnectScreen";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { SpawnScreen } from "./src/screens/SpawnScreen";
+import { useConnection } from "./src/store";
+
+const queryClient = new QueryClient();
 
 // The terminal pulls in the Skia native module; loading it lazily keeps a
 // broken native module from black-screening the whole app at bundle eval —
@@ -20,8 +23,6 @@ function LazyTerminal(props: {
     typeof import("./src/components/Terminal");
   return <Terminal {...props} />;
 }
-
-const CONFIG_KEY = "landline.connection";
 
 /** Release builds have no dev overlay; render crashes as text rather than
  * dying to a black screen. */
@@ -58,16 +59,23 @@ type Screen =
   | { name: "terminal"; session: string };
 
 export default function App() {
-  const [cfg, setCfg] = useState<ConnectionConfig | null>(null);
-  const [initial, setInitial] = useState<ConnectionConfig>({ host: "", token: "" });
+  const { config, hydrated, setConfig, clearConfig } = useConnection();
+  // Connected = the user passed the connect screen this run; config alone
+  // persists across restarts and only prefills the form.
+  const [connected, setConnected] = useState(false);
   const [screen, setScreen] = useState<Screen>({ name: "connect" });
   const [fatal, setFatal] = useState<string | null>(null);
 
+  // CI-only: EXPO_PUBLIC_AUTOTEST is inlined at bundle time for the
+  // simulator smoke build (never the shipped ipa); it drives straight into
+  // a terminal against the mock daemon on the runner.
   useEffect(() => {
-    AsyncStorage.getItem(CONFIG_KEY).then((raw) => {
-      if (raw) setInitial(JSON.parse(raw));
-    });
-  }, []);
+    if (process.env.EXPO_PUBLIC_AUTOTEST === "1") {
+      setConfig({ host: "127.0.0.1:7181", token: "autotest" });
+      setConnected(true);
+      setScreen({ name: "terminal", session: "s1" });
+    }
+  }, [setConfig]);
 
   // Uncaught errors outside render (event handlers, timers, WS callbacks)
   // bypass the ErrorBoundary; surface them as text too.
@@ -93,24 +101,29 @@ export default function App() {
     );
   }
 
-  const connected = (c: ConnectionConfig) => {
-    setCfg(c);
-    AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(c));
-    setScreen({ name: "sessions" });
-  };
-
   const body = () => {
-    if (!cfg || screen.name === "connect")
-      return <ConnectScreen initial={initial} onConnected={connected} />;
+    if (!hydrated) return null;
+    if (!connected || !config || screen.name === "connect")
+      return (
+        <ConnectScreen
+          initial={config ?? { host: "", token: "" }}
+          onConnected={(c) => {
+            setConfig(c);
+            setConnected(true);
+            setScreen({ name: "sessions" });
+          }}
+        />
+      );
     switch (screen.name) {
       case "sessions":
         return (
           <SessionsScreen
-            cfg={cfg}
+            cfg={config}
             onOpen={(s: SessionInfo) => setScreen({ name: "terminal", session: s.id })}
             onSpawn={() => setScreen({ name: "spawn" })}
             onDisconnect={() => {
-              setCfg(null);
+              // Back to the connect screen; keep the saved config as prefill.
+              setConnected(false);
               setScreen({ name: "connect" });
             }}
           />
@@ -118,7 +131,7 @@ export default function App() {
       case "spawn":
         return (
           <SpawnScreen
-            cfg={cfg}
+            cfg={config}
             onSpawned={(info) => setScreen({ name: "terminal", session: info.id })}
             onBack={() => setScreen({ name: "sessions" })}
           />
@@ -126,7 +139,7 @@ export default function App() {
       case "terminal":
         return (
           <LazyTerminal
-            cfg={cfg}
+            cfg={config}
             session={screen.session}
             onBack={() => setScreen({ name: "sessions" })}
           />
@@ -135,10 +148,12 @@ export default function App() {
   };
 
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar style="light" />
-      <ErrorBoundary>{body()}</ErrorBoundary>
-    </SafeAreaView>
+    <QueryClientProvider client={queryClient}>
+      <SafeAreaView style={styles.root}>
+        <StatusBar style="light" />
+        <ErrorBoundary>{body()}</ErrorBoundary>
+      </SafeAreaView>
+    </QueryClientProvider>
   );
 }
 

@@ -1,6 +1,14 @@
-# Build the unsigned iOS .ipa and publish it through the fixed-tag
+# Build the unsigned iOS ipas and publish them through the fixed-tag
 # `sidestore` release, whose asset URLs are the stable install channel
 # (users re-sign with their own Apple ID at install time — no dev account).
+#
+# Jobs:
+#   release — the shippable app; simulator-smoke-tested against a mock
+#             daemon (attaches and renders a terminal) before publishing.
+#   dev     — expo-dev-client variant (.dev bundle id) that loads JS from a
+#             Metro server for fast local iteration.
+#   publish — regenerates source.json from both ipas and updates the
+#             fixed-tag release.
 name: ios-ipa
 
 on:
@@ -12,7 +20,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  release:
     runs-on: macos-15
     timeout-minutes: 90
     defaults:
@@ -28,16 +36,11 @@ jobs:
           PICK=""
           for x in /Applications/Xcode_*.app; do
             v=$("$x"/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift --version 2>/dev/null | head -1)
-            echo "$x -> $v"
             case "$v" in *"Swift version 6.2"*) PICK="$x";; esac
           done
-          if [ -z "$PICK" ]; then
-            echo "no Swift 6.2 toolchain found; falling back to newest"
-            PICK=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
-          fi
+          [ -z "$PICK" ] && PICK=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
           echo "using $PICK"
           sudo xcode-select -s "$PICK"
-          xcodebuild -version
 
       - uses: pnpm/action-setup@v4
         with:
@@ -75,11 +78,6 @@ jobs:
           if [ $status -ne 0 ]; then
             echo "===== error lines ====="
             grep -nE "(^|\s)error:|fatal error|Command PhaseScriptExecution failed" xcodebuild.log | head -60
-            echo "===== failing script phase context ====="
-            grep -n "PhaseScriptExecution" xcodebuild.log | tail -5
-            awk '/PhaseScriptExecution/{p=NR} END{print p}' xcodebuild.log | while read -r n; do
-              [ -n "$n" ] && sed -n "${n},$((n+120))p" xcodebuild.log
-            done
             echo "===== tail ====="
             tail -120 xcodebuild.log
           else
@@ -103,11 +101,13 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry out/landline.ipa Payload
 
-      # Boot the app on a simulator before publishing: a build that
-      # black-screens must never reach the install channel. The screenshot
-      # and JS console land in artifacts for remote eyes.
+      # Boot the app on a simulator and drive a real terminal against a
+      # mock daemon: a build that black-screens or dies on attach must
+      # never reach the install channel. Screenshot + JS console land in
+      # artifacts for remote eyes.
       - name: Simulator smoke test
         run: |
+          export EXPO_PUBLIC_AUTOTEST=1
           xcodebuild \
             -workspace ios/landline.xcworkspace \
             -scheme landline \
@@ -116,6 +116,7 @@ jobs:
             -derivedDataPath simbuild \
             CODE_SIGNING_ALLOWED=NO \
             build > simbuild.log 2>&1 || { tail -80 simbuild.log; exit 1; }
+          python3 ../../scripts/e2e/mock-daemon.py > mock-daemon.log 2>&1 &
           UDID=$(xcrun simctl list devices available --json | python3 -c "
           import json, sys
           devices = json.load(sys.stdin)['devices']
@@ -129,12 +130,14 @@ jobs:
           xcrun simctl bootstatus "$UDID" -b
           xcrun simctl install "$UDID" simbuild/Build/Products/Release-iphonesimulator/landline.app
           xcrun simctl launch --console-pty "$UDID" com.tcolb.landline > sim-console.log 2>&1 &
-          sleep 15
+          sleep 25
           xcrun simctl io "$UDID" screenshot sim-screen.png
           echo "--- app console ---"
           cat sim-console.log
+          echo "--- mock daemon ---"
+          cat mock-daemon.log
           if ! xcrun simctl spawn "$UDID" launchctl list | grep -q com.tcolb.landline; then
-            echo "APP PROCESS DIED WITHIN 15s"
+            echo "APP PROCESS DIED"
             exit 1
           fi
 
@@ -146,14 +149,121 @@ jobs:
           path: |
             apps/mobile/sim-screen.png
             apps/mobile/sim-console.log
+            apps/mobile/mock-daemon.log
           if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: landline-ipa
+          path: apps/mobile/out/landline.ipa
+
+  dev:
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode with Swift 6.2
+        run: |
+          PICK=""
+          for x in /Applications/Xcode_*.app; do
+            v=$("$x"/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift --version 2>/dev/null | head -1)
+            case "$v" in *"Swift version 6.2"*) PICK="$x";; esac
+          done
+          [ -z "$PICK" ] && PICK=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)
+          sudo xcode-select -s "$PICK"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/mobile/pnpm-lock.yaml
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the native iOS project (dev variant)
+        run: APP_VARIANT=dev pnpm exec expo prebuild --platform ios --no-install
+
+      - name: Install pods
+        run: pod install --project-directory=ios
+
+      # Debug configuration: dev-client launcher included, JS loaded from a
+      # Metro dev server at runtime instead of a bundled jsbundle.
+      - name: Build dev client (unsigned, Debug)
+        run: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "workspace: $WORKSPACE scheme: $SCHEME"
+          set +e
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Debug \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build > xcodebuild-dev.log 2>&1
+          status=$?
+          if [ $status -ne 0 ]; then
+            grep -nE "(^|\s)error:|fatal error" xcodebuild-dev.log | head -40
+            tail -80 xcodebuild-dev.log
+          fi
+          exit $status
+
+      - name: Upload dev build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-dev-log
+          path: apps/mobile/xcodebuild-dev.log
+          if-no-files-found: ignore
+
+      - name: Package dev .ipa
+        run: |
+          APP=$(ls -d build/Build/Products/Debug-iphoneos/*.app | head -1)
+          test -d "$APP"
+          rm -rf Payload out && mkdir -p Payload out
+          cp -R "$APP" Payload/
+          zip -qry out/landline-dev.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: landline-dev-ipa
+          path: apps/mobile/out/landline-dev.ipa
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: [release, dev]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: landline-ipa
+          path: out
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: landline-dev-ipa
+          path: out
 
       - name: Generate SideStore source
         run: |
-          python3 ../../scripts/make-sidestore-source.py \
+          python3 scripts/make-sidestore-source.py out/source.json \
             out/landline.ipa \
             "https://github.com/${{ github.repository }}/releases/download/sidestore/landline.ipa" \
-            out/source.json
+            out/landline-dev.ipa \
+            "https://github.com/${{ github.repository }}/releases/download/sidestore/landline-dev.ipa"
           cat out/source.json
 
       - name: Publish to the sidestore release channel
@@ -165,10 +275,5 @@ jobs:
               --repo "${{ github.repository }}" \
               --title "SideStore channel" \
               --notes "Install in SideStore: sidestore://source?url=https://github.com/${{ github.repository }}/releases/download/sidestore/source.json — or add the source URL manually: https://github.com/${{ github.repository }}/releases/download/sidestore/source.json"
-          gh release upload sidestore out/landline.ipa out/source.json \
+          gh release upload sidestore out/landline.ipa out/landline-dev.ipa out/source.json \
             --repo "${{ github.repository }}" --clobber
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: landline-ipa
-          path: apps/mobile/out/landline.ipa

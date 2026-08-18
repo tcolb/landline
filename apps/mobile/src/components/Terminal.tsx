@@ -97,6 +97,15 @@ export function Terminal({ cfg, session, onBack }: Props) {
   };
 
   const repaint = useCallback(() => {
+    try {
+      repaintInner();
+    } catch (e: any) {
+      setStatus(`render error: ${String(e?.message ?? e)}`);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const repaintInner = useCallback(() => {
     const { font, cellW: CELL_W, cellH: CELL_H, baseline: BASELINE } = getFontInfo();
     const rows = grid.current.length;
     if (rows === 0) return;
