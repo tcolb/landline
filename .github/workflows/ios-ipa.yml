@@ -163,6 +163,16 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry out/landline.ipa Payload
 
+      # Persist caches BEFORE the smoke gate: a failed smoke must not throw
+      # away the compile work (the sim compile below adds little — the smoke
+      # rebuild next run restores instantly either way).
+      - name: Save CocoaPods
+        if: github.ref == 'refs/heads/main' && steps.restore-pods.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/Library/Caches/CocoaPods
+          key: pods-ios-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}
+
       # Boot the app on a simulator and drive a real terminal against a
       # mock daemon: a build that black-screens or dies on attach must
       # never reach the install channel. Screenshot + JS console land in
@@ -170,6 +180,12 @@ jobs:
       - name: Simulator smoke test
         run: |
           export EXPO_PUBLIC_AUTOTEST=1
+          # Constants-manifest path: read by app.config.js during the
+          # EXConstants build phase, immune to Metro transform caching.
+          export LANDLINE_AUTOTEST=1
+          # The device bundle above warmed Metro's transform cache WITHOUT
+          # these vars; stale entries would silently drop the inline.
+          rm -rf "$TMPDIR"/metro-* "$TMPDIR"/haste-* node_modules/.cache 2>/dev/null || true
           xcodebuild \
             -workspace ios/landline.xcworkspace \
             -scheme landline \
@@ -225,21 +241,14 @@ jobs:
         run: ccache -s -v 2>/dev/null || ccache -s
 
       # Only main persists caches: one authoritative warm entry instead of a
-      # per-branch pile LRU-evicting it. Pods can't overwrite an existing
-      # key, so its save is gated on a restore miss.
+      # per-branch pile LRU-evicting it. always(): a smoke failure must not
+      # discard the compile work (device + sim objects both live here).
       - name: Save ccache
-        if: github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
         with:
           path: ${{ github.workspace }}/.ccache
           key: ccache-ios-release-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}-${{ github.sha }}
-
-      - name: Save CocoaPods
-        if: github.ref == 'refs/heads/main' && steps.restore-pods.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/Library/Caches/CocoaPods
-          key: pods-ios-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}
 
       - uses: actions/upload-artifact@v4
         with:

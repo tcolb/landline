@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
 import { SafeAreaView, ScrollView, StyleSheet, Text } from "react-native";
@@ -72,9 +73,11 @@ export default function App() {
   // hydration: rehydrating from empty storage after this effect would
   // clobber the config back to null and land on the connect screen.
   useEffect(() => {
-    console.log(`landline autotest=${process.env.EXPO_PUBLIC_AUTOTEST ?? "unset"} hydrated=${hydrated}`);
     if (!hydrated) return;
-    if (process.env.EXPO_PUBLIC_AUTOTEST === "1") {
+    const autotest =
+      process.env.EXPO_PUBLIC_AUTOTEST === "1" ||
+      Constants.expoConfig?.extra?.autotest === "1";
+    if (autotest) {
       setConfig({ host: "127.0.0.1:7181", token: "autotest" });
       setConnected(true);
       setScreen({ name: "terminal", session: "s1" });
