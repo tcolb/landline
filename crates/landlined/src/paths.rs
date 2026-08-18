@@ -12,3 +12,12 @@ pub fn socket_path() -> PathBuf {
 pub fn log_path() -> PathBuf {
     socket_path().with_extension("log")
 }
+
+pub fn data_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+    PathBuf::from(home).join(".local/share/landline")
+}
+
+pub fn ws_token_path() -> PathBuf {
+    data_dir().join("ws-token")
+}

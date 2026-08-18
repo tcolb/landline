@@ -36,8 +36,15 @@ pub enum Event {
 
 pub enum Ctl {
     Snapshot(xchan::Sender<Frame>),
-    Resize { rows: u16, cols: u16 },
-    ChildExited { code: Option<i32> },
+    /// Current screen serialized as a VT escape stream (bytes-mode attach).
+    VtSnapshot(xchan::Sender<Vec<u8>>),
+    Resize {
+        rows: u16,
+        cols: u16,
+    },
+    ChildExited {
+        code: Option<i32>,
+    },
 }
 
 pub struct Session {
@@ -45,8 +52,13 @@ pub struct Session {
     pub input_tx: xchan::Sender<Vec<u8>>,
     pub ctl_tx: xchan::Sender<Ctl>,
     pub events: broadcast::Sender<Event>,
+    /// Raw PTY output tee for bytes-mode clients.
+    pub bytes: broadcast::Sender<Vec<u8>>,
     pub killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
     pub environment: Box<dyn Environment>,
+    /// Last screen of an exited session, servable postmortem.
+    pub final_frame: Mutex<Option<Frame>>,
+    pub final_vt: Mutex<Option<Vec<u8>>>,
 }
 
 impl Session {
@@ -65,6 +77,7 @@ impl Session {
         let (input_tx, input_rx) = xchan::bounded::<Vec<u8>>(256);
         let (ctl_tx, ctl_rx) = xchan::unbounded::<Ctl>();
         let (events, _) = broadcast::channel::<Event>(256);
+        let (bytes, _) = broadcast::channel::<Vec<u8>>(256);
 
         let mut reader = master.try_clone_reader()?;
         let mut writer = master.take_writer()?;
@@ -74,18 +87,23 @@ impl Session {
             input_tx,
             ctl_tx: ctl_tx.clone(),
             events: events.clone(),
+            bytes: bytes.clone(),
             killer: Mutex::new(killer),
             environment: env,
+            final_frame: Mutex::new(None),
+            final_vt: Mutex::new(None),
         });
 
-        // Reader: PTY output -> VT thread. EOF means the child side closed.
+        // Reader: PTY output -> VT thread, teed to bytes-mode subscribers.
         std::thread::spawn(move || {
             let mut buf = [0u8; 16 * 1024];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        if out_tx.send(buf[..n].to_vec()).is_err() {
+                        let chunk = buf[..n].to_vec();
+                        let _ = bytes.send(chunk.clone()); // no subscribers is fine
+                        if out_tx.send(chunk).is_err() {
                             break;
                         }
                     }
@@ -168,6 +186,9 @@ fn vt_loop(
                 Ok(Ctl::Snapshot(reply)) => {
                     let _ = reply.send(screen.snapshot());
                 }
+                Ok(Ctl::VtSnapshot(reply)) => {
+                    let _ = reply.send(screen.vt_dump());
+                }
                 Ok(Ctl::Resize { rows, cols }) => {
                     let _ = master.resize(portable_pty::PtySize {
                         rows, cols, pixel_width: 0, pixel_height: 0,
@@ -188,6 +209,10 @@ fn vt_loop(
                     if let Some(frame) = screen.diff() {
                         let _ = session.events.send(Event::Frame(frame));
                     }
+                    // Retain the final screen (both altitudes): the VT thread
+                    // ends here, but attach must keep working postmortem.
+                    *session.final_frame.lock().unwrap() = Some(screen.snapshot());
+                    *session.final_vt.lock().unwrap() = Some(screen.vt_dump());
                     session.info.lock().unwrap().status = SessionStatus::Exited { code };
                     session.environment.cleanup();
                     let _ = session.events.send(Event::Exited { code });

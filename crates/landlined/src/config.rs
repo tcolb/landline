@@ -166,6 +166,39 @@ pub enum EnvValue {
     Secret { secret: String },
 }
 
+/// Daemon-level config: `~/.config/landline/config.toml`. Distinct from the
+/// per-kind registries; holds settings that belong to the daemon process.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct DaemonConfig {
+    #[serde(default)]
+    pub hooks: Hooks,
+}
+
+/// Lifecycle hooks: shell commands run (detached, non-blocking) on session
+/// events, with `LANDLINE_SESSION_*` env vars describing the session. This
+/// is the extensibility point external frontends adapt through.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct Hooks {
+    pub session_created: Option<String>,
+    pub session_exited: Option<String>,
+}
+
+pub fn load_daemon_config() -> DaemonConfig {
+    let path = user_config_dir().join("config.toml");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return DaemonConfig::default();
+    };
+    match toml::from_str(&raw) {
+        Ok(cfg) => cfg,
+        Err(e) => {
+            tracing::warn!("ignoring bad {}: {e}", path.display());
+            DaemonConfig::default()
+        }
+    }
+}
+
 pub fn user_config_dir() -> PathBuf {
     std::env::var("LANDLINE_CONFIG_DIR")
         .map(PathBuf::from)

@@ -1,0 +1,182 @@
+# landline protocol
+
+Version: **1**. The protocol between any client and `landlined`. It is the
+product boundary: everything the CLI, the mobile app, dashboards, and
+third-party frontends can do goes through these messages. Plain JSON — no
+client needs code from this repo.
+
+## Transports
+
+Both transports carry the identical message set:
+
+- **Unix socket** — newline-delimited JSON. One message per line. Socket at
+  `$XDG_RUNTIME_DIR/landline.sock` (fallback `/tmp/landline-<uid>.sock`).
+- **WebSocket** — one JSON message per text frame. Served when the daemon
+  runs with `--ws ADDR`; connect to `ws://ADDR/ws?token=<token>`, where
+  `<token>` is the contents of `~/.local/share/landline/ws-token` (generated
+  0600 on first start). This is bearer-token access for LAN/tunnel use;
+  real pairing and E2E encryption arrive with the relay (M5).
+
+Binary payloads (`input`, `bytes`) are base64 strings (standard alphabet,
+padded).
+
+## Negotiation
+
+Optional but recommended as the first message:
+
+```json
+→ {"type": "hello", "version": 1}
+← {"type": "hello", "version": 1, "features": ["frames", "bytes", "watch", "templates"]}
+```
+
+The server replies with its protocol version and feature list; a client that
+needs a missing feature should disconnect with an error to its user. Servers
+never change behavior based on the client's stated version within a major
+protocol version.
+
+## Message flow
+
+A connection is in one of three states: **control** (initial), **attached**,
+or **watching**. `attach` and `watch` are one-way doors: they consume the
+rest of the connection. Open one connection per concern.
+
+### Control state
+
+| Request | Response |
+|---|---|
+| `{"type": "spawn", "spawn": SpawnRequest}` | `spawned` or `error` |
+| `{"type": "ls"}` | `sessions` |
+| `{"type": "kill", "session": ID_OR_NAME}` | `ok` or `error` |
+| `{"type": "attach", "session": ID_OR_NAME, "mode": "frames" \| "bytes"}` | → attached state |
+| `{"type": "watch"}` | `ok`, then → watching state |
+
+`SpawnRequest`:
+
+```json
+{
+  "template": "webapp-fix",          // optional; resolved daemon-side
+  "params": {"branch": "main"},      // template parameters
+  "name": "fix-login",               // optional; defaults to session id
+  "cmd": ["claude"],                 // inline command (overrides template)
+  "cwd": "/home/user/project",       // client cwd; workspace root
+  "env": "gpu-box",                  // named environment spec, or "host"
+  "image": "ubuntu:24.04",           // shorthand: per-session container
+  "rows": 24, "cols": 80
+}
+```
+
+Sessions are addressed by id (`s1`) or name; a name resolves to the running
+session bearing it in preference to exited ones.
+
+### Attached state (`mode: "frames"`)
+
+For thin clients that paint cells and bring no emulator (the mobile app).
+
+On attach the server sends a `frame` of kind `snapshot`, then `frame`s of
+kind `diff` coalesced on a ~16 ms tick. A snapshot fully replaces client
+state; a diff carries only changed rows. If the server ever falls behind a
+slow client it resynchronizes by sending a fresh snapshot — clients must
+handle a snapshot at any time.
+
+```json
+← {"type": "frame", "frame": {
+     "kind": "snapshot", "rows": 24, "cols": 80,
+     "lines": [{"y": 0, "cells": [{"t": "h", "fg": [255,0,0], "bg": null, "fl": 1}, …]}, …],
+     "cursor": {"x": 5, "y": 0, "visible": true}}}
+← {"type": "frame", "frame": {"kind": "diff", "lines": […], "cursor": …}}
+```
+
+Cell fields: `t` — full grapheme cluster as UTF-8 (empty = blank); `fg`/`bg`
+— RGB triples or null for default; `fl` — flag bits: 1 bold, 2 italic,
+4 underline, 8 inverse, 16 faint, 32 strikethrough, 64 wide-spacer (a
+continuation cell of a wide grapheme; render nothing, the base cell spans).
+
+### Attached state (`mode: "bytes"`)
+
+For clients with their own terminal emulator — tmux-attach semantics. This
+is what `landline attach --mode bytes` uses, and what makes any terminal
+frontend able to host a landline session as an ordinary pane command.
+
+On attach the server sends one `bytes` message containing a
+**VT-reconstruction snapshot**: the current screen (content including
+scrollback, styles, cursor, terminal modes) serialized as an escape stream
+by the server-side emulator. Replaying it into a fresh emulator reproduces
+the live screen instantly. After that, raw PTY output streams as further
+`bytes` messages. If the server drops output for a slow client, it resyncs
+with a fresh reconstruction snapshot.
+
+```json
+← {"type": "bytes", "data": "G1sxOzFIG1sybUhlbGxv…"}
+```
+
+### Client → server while attached (both modes)
+
+```json
+→ {"type": "input", "data": "aGVsbG8="}        // base64 keyboard bytes
+→ {"type": "resize", "rows": 50, "cols": 120}  // last writer wins
+→ {"type": "detach"}                           // server closes gracefully
+```
+
+When the session's child exits, the server sends any final output, then:
+
+```json
+← {"type": "exited", "code": 0}
+```
+
+Attaching to an already-exited session yields its retained final screen
+(one `frame` or `bytes` message) followed by `exited` — postmortem attach
+always shows the last screen.
+
+### Watching state
+
+Session lifecycle events, no terminal streams — the control plane for
+orchestrators, dashboards, and frontend adapters:
+
+```json
+← {"type": "event", "event": {"kind": "created", "info": SessionInfo}}
+← {"type": "event", "event": {"kind": "exited",  "info": SessionInfo}}
+```
+
+`SessionInfo`:
+
+```json
+{"id": "s1", "name": "fix-login", "cmd": ["claude"], "cwd": "/home/user/p",
+ "environment": "container:ubuntu:24.04", "rows": 24, "cols": 80,
+ "status": {"state": "running"}}          // or {"state": "exited", "code": 0}
+```
+
+Only `detach` is valid from the client while watching.
+
+## Errors
+
+Any request can produce `{"type": "error", "message": "…"}`. Errors do not
+close the connection except where noted; a client should treat an error to
+`attach`/`spawn` as terminal for that operation, not the connection.
+
+## Hooks (server-side, not wire messages)
+
+The daemon runs user-configured commands on the same lifecycle events
+`watch` exposes — `~/.config/landline/config.toml`:
+
+```toml
+[hooks]
+session_created = "my-adapter add"
+session_exited  = "my-adapter remove"
+```
+
+Hooks run detached via `sh -c` with `LANDLINE_EVENT`,
+`LANDLINE_SESSION_ID`, `LANDLINE_SESSION_NAME`,
+`LANDLINE_SESSION_ENVIRONMENT`, `LANDLINE_SESSION_CWD`, and (on exit)
+`LANDLINE_EXIT_CODE` in the environment. Together with `bytes`-mode attach
+they are the extension points for hosting landline sessions inside other
+frontends.
+
+## Compatibility rules
+
+- Additions (new request/response types, new fields) are backward
+  compatible within a version; clients must ignore unknown fields and
+  tolerate unknown response types.
+- Removals or semantic changes bump `version` and are announced in the
+  `hello` exchange.
+- Binary frame encoding, if ever added, will be negotiated via `hello`
+  features; JSON remains the baseline.

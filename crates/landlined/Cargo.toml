@@ -22,3 +22,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 crossbeam-channel = "0.5"
 libc = "0.2"
 toml = "0.8"
+axum = { version = "0.8", features = ["ws"] }
+futures-util = "0.3"

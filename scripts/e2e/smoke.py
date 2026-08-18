@@ -1,4 +1,4 @@
-import json, socket, sys, time, os
+import base64, json, socket, sys, time, os
 
 SOCK = os.environ.get("XDG_RUNTIME_DIR", "/tmp") + "/landline.sock"
 
@@ -61,7 +61,7 @@ time.sleep(0.5)
 b = conn()
 rpc(b, {"type":"attach","session":"t2"})
 snap = next(lines(b)); assert snap["frame"]["kind"]=="snapshot"
-rpc(b, {"type":"input","data":list(b"echo INPUT_$((6*7))\r")})
+rpc(b, {"type":"input","data":base64.b64encode(b"echo INPUT_$((6*7))\r").decode()})
 found = False
 deadline = time.time()+5
 gen = lines(b, timeout=5)

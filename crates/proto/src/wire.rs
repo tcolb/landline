@@ -1,14 +1,34 @@
 //! Wire protocol between clients and `landlined`.
 //!
-//! M1 transport: newline-delimited JSON over a unix socket. The same message
-//! set is reused over WebSocket in later milestones; frame encoding may move
-//! to a binary format then, so keep these types transport-agnostic.
+//! Transports: newline-delimited JSON over the unix socket; one JSON message
+//! per text frame over WebSocket. The message set is identical on both.
+//! Binary payloads (`input`, `bytes`) are base64 strings. The full contract
+//! lives in `docs/PROTOCOL.md`; keep these types transport-agnostic.
 
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
 pub const PROTOCOL_VERSION: u32 = 1;
+
+/// Feature names reported in [`Response::Hello`].
+pub const FEATURES: &[&str] = &["frames", "bytes", "watch", "templates"];
+
+/// Base64 (standard alphabet, padded) serde adapter for binary payloads.
+pub mod b64 {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(data: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&STANDARD.encode(data))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(d)?;
+        STANDARD.decode(s).map_err(serde::de::Error::custom)
+    }
+}
 
 /// Cell attribute bits in [`CellData::flags`].
 pub mod cellflags {
@@ -61,16 +81,51 @@ pub struct SpawnRequest {
     pub cols: u16,
 }
 
+/// How an attached client wants session output delivered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachMode {
+    /// Server-rendered snapshot + dirty-row diffs ([`Frame`]s). For thin
+    /// clients that paint cells and bring no emulator.
+    #[default]
+    Frames,
+    /// Raw PTY passthrough ([`Response::Bytes`]), preceded by a
+    /// VT-reconstruction snapshot of the current screen. For clients with
+    /// their own terminal emulator — tmux-attach semantics.
+    Bytes,
+}
+
 /// Client → daemon. `Input`/`Resize`/`Detach` are only valid after `Attach`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
-    Spawn { spawn: SpawnRequest },
+    /// Optional version/capability negotiation; valid as any message, but
+    /// conventionally first.
+    Hello {
+        version: u32,
+    },
+    Spawn {
+        spawn: SpawnRequest,
+    },
     Ls,
-    Kill { session: String },
-    Attach { session: String },
-    Input { data: Vec<u8> },
-    Resize { rows: u16, cols: u16 },
+    Kill {
+        session: String,
+    },
+    Attach {
+        session: String,
+        #[serde(default)]
+        mode: AttachMode,
+    },
+    /// Subscribe to session lifecycle events for the rest of the connection.
+    Watch,
+    Input {
+        #[serde(with = "b64")]
+        data: Vec<u8>,
+    },
+    Resize {
+        rows: u16,
+        cols: u16,
+    },
     Detach,
 }
 
@@ -79,11 +134,47 @@ pub enum Request {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
     Ok,
-    Error { message: String },
-    Spawned { info: SessionInfo },
-    Sessions { sessions: Vec<SessionInfo> },
-    Frame { frame: Frame },
-    Exited { code: Option<i32> },
+    Error {
+        message: String,
+    },
+    Hello {
+        version: u32,
+        features: Vec<String>,
+    },
+    Spawned {
+        info: SessionInfo,
+    },
+    Sessions {
+        sessions: Vec<SessionInfo>,
+    },
+    Frame {
+        frame: Frame,
+    },
+    /// Raw PTY output; only in `bytes` attach mode.
+    Bytes {
+        #[serde(with = "b64")]
+        data: Vec<u8>,
+    },
+    /// Session lifecycle event; only after `Watch`.
+    Event {
+        event: SessionEvent,
+    },
+    Exited {
+        code: Option<i32>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionEvent {
+    pub kind: SessionEventKind,
+    pub info: SessionInfo,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEventKind {
+    Created,
+    Exited,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

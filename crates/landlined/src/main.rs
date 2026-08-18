@@ -6,6 +6,7 @@ mod paths;
 mod screen;
 mod session;
 mod spawn;
+mod web;
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -22,10 +23,23 @@ struct Cli {
     command: Command,
 }
 
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum ModeArg {
+    /// Server-rendered cell frames (thin client).
+    Frames,
+    /// Raw PTY passthrough into this terminal's own emulator (shim mode).
+    Bytes,
+}
+
 #[derive(Subcommand)]
 enum Command {
     /// Run the daemon in the foreground.
-    Daemon,
+    Daemon {
+        /// Also serve the protocol over WebSocket, e.g. 127.0.0.1:7070.
+        /// Access requires the token in ~/.local/share/landline/ws-token.
+        #[arg(long, value_name = "ADDR")]
+        ws: Option<std::net::SocketAddr>,
+    },
     /// Spawn a session from a template and/or an inline command:
     ///   landline spawn TEMPLATE [-p key=value]...
     ///   landline spawn [--env NAME | --image IMG] -- CMD [ARGS...]
@@ -54,7 +68,13 @@ enum Command {
     /// Kill a session by id or name.
     Kill { session: String },
     /// Attach to a session by id or name. Detach with Ctrl-\.
-    Attach { session: String },
+    Attach {
+        session: String,
+        /// frames: server-rendered cells. bytes: raw PTY passthrough for
+        /// terminals with their own emulator (hosting landline in a pane).
+        #[arg(long, value_enum, default_value = "frames")]
+        mode: ModeArg,
+    },
 }
 
 fn main() -> Result<()> {
@@ -68,7 +88,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     let socket = paths::socket_path();
     match cli.command {
-        Command::Daemon => tokio::runtime::Runtime::new()?.block_on(daemon::run(socket)),
+        Command::Daemon { ws } => tokio::runtime::Runtime::new()?.block_on(daemon::run(socket, ws)),
         Command::Spawn {
             template,
             params,
@@ -145,7 +165,14 @@ fn main() -> Result<()> {
                 other => fail(other),
             }
         }
-        Command::Attach { session } => attach::run(&socket, &session),
+        Command::Attach { session, mode } => attach::run(
+            &socket,
+            &session,
+            match mode {
+                ModeArg::Frames => landline_proto::wire::AttachMode::Frames,
+                ModeArg::Bytes => landline_proto::wire::AttachMode::Bytes,
+            },
+        ),
     }
 }
 

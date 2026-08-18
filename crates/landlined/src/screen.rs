@@ -7,6 +7,7 @@
 use landline_proto::wire::{CellData, Cursor, Frame, RowData, cellflags};
 use libghostty_vt::{
     RenderState,
+    fmt::{Format, Formatter, FormatterOptions},
     render::{CellIterator, Dirty, RowIterator, Snapshot},
     screen::CellWide,
     terminal::{Options, Terminal},
@@ -20,6 +21,10 @@ pub trait Screen {
     fn snapshot(&mut self) -> Frame;
     /// Rows changed since the last `snapshot`/`diff`, or `None` if clean.
     fn diff(&mut self) -> Option<Frame>;
+    /// Serialize the current terminal state (content incl. scrollback,
+    /// styles, cursor, modes) as a VT escape stream: replaying it into a
+    /// fresh emulator reproduces the screen. Powers `bytes`-mode attach.
+    fn vt_dump(&mut self) -> Vec<u8>;
 }
 
 pub struct GhosttyScreen {
@@ -175,6 +180,33 @@ impl Screen for GhosttyScreen {
         }
     }
 
+    fn vt_dump(&mut self) -> Vec<u8> {
+        let opts = FormatterOptions::new()
+            .with_format(Format::Vt)
+            .with_modes(true)
+            .with_scrolling_region(true)
+            .with_tabstops(true)
+            .with_keyboard(true)
+            .with_cursor(true)
+            .with_style(true)
+            .with_hyperlink(true)
+            .with_kitty_keyboard(true)
+            .with_charsets(true);
+        match Formatter::new(&self.term, opts) {
+            Ok(mut f) => match f.format_alloc(None) {
+                Ok(bytes) => bytes.to_vec(),
+                Err(e) => {
+                    tracing::warn!("vt dump format failed: {e:?}");
+                    Vec::new()
+                }
+            },
+            Err(e) => {
+                tracing::warn!("vt dump formatter init failed: {e:?}");
+                Vec::new()
+            }
+        }
+    }
+
     fn diff(&mut self) -> Option<Frame> {
         let snap = self.state.update(&self.term).ok()?;
         let dirty = snap.dirty().ok()?;
@@ -239,6 +271,32 @@ mod tests {
             "snapshot must be viewport-sized"
         );
         assert!(snapped.as_secs() < 2, "snapshot too slow: {snapped:?}");
+    }
+
+    #[test]
+    fn vt_dump_replays_into_identical_screen() {
+        let mut s = GhosttyScreen::new(5, 20, 100).unwrap();
+        s.write(b"\x1b[31mhello\x1b[0m world\r\nline2\r\n");
+        let dump = s.vt_dump();
+        assert!(!dump.is_empty());
+
+        let mut replay = GhosttyScreen::new(5, 20, 100).unwrap();
+        replay.write(&dump);
+        let (a, b) = (s.snapshot(), replay.snapshot());
+        let row_text = |f: &Frame, y: usize| -> String {
+            let Frame::Snapshot { lines, .. } = f else {
+                panic!("expected snapshot")
+            };
+            lines[y]
+                .cells
+                .iter()
+                .map(|c| if c.t.is_empty() { " " } else { c.t.as_str() })
+                .collect()
+        };
+        assert!(row_text(&a, 0).starts_with("hello world"));
+        for y in 0..3 {
+            assert_eq!(row_text(&a, y), row_text(&b, y), "row {y} differs");
+        }
     }
 
     #[test]

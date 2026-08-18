@@ -1,4 +1,4 @@
-import json, socket, time, os
+import base64, json, socket, time, os
 SOCK = os.environ.get("XDG_RUNTIME_DIR", "/tmp") + "/landline.sock"
 def conn():
     s = socket.socket(socket.AF_UNIX); s.connect(SOCK); return s
@@ -25,7 +25,7 @@ tildes = sum(1 for t in text if t.startswith("~"))
 assert tildes > 10, (tildes, text)
 print(f"vim ok: {tildes} tilde rows, alternate screen rendered")
 # type into vim: insert mode, text, back to normal
-rpc(a, {"type":"input","data":list(b"iHello from landline\x1b")})
+rpc(a, {"type":"input","data":base64.b64encode(b"iHello from landline\x1b").decode()})
 time.sleep(0.5)
 found=False
 for msg in lines(a, timeout=2):
@@ -35,7 +35,7 @@ for msg in lines(a, timeout=2):
     if found: break
 assert found, "vim edit not rendered"
 print("vim editing renders through diffs ok")
-rpc(a, {"type":"input","data":list(b":q!\r")})
+rpc(a, {"type":"input","data":base64.b64encode(b":q!\r").decode()})
 time.sleep(0.5)
 
 # throughput: 100k lines through the VT

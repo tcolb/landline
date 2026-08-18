@@ -1,20 +1,29 @@
-//! Terminal attach client: a deliberately dumb renderer.
+//! Terminal attach client.
 //!
-//! It paints frames the daemon sends and forwards raw stdin bytes back —
-//! the same job the mobile client will do, which is the point: attaching
-//! validates the protocol, not a second emulator.
+//! `frames` mode is a deliberately dumb renderer: it paints frames the
+//! daemon sends and forwards raw stdin bytes back — the same job the mobile
+//! client will do, which is the point: attaching validates the protocol,
+//! not a second emulator.
+//!
+//! `bytes` mode is the opposite altitude: raw PTY passthrough into the
+//! hosting terminal's own emulator. This is the universal shim — any
+//! frontend that can run a command in a pane can run `landline attach
+//! --mode bytes` and host a landline session.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 use anyhow::{Context, Result};
-use landline_proto::wire::{CellData, Cursor, Frame, Request, Response, RowData, cellflags};
+use landline_proto::wire::{
+    AttachMode, CellData, Cursor, Frame, Request, Response, RowData, cellflags,
+};
 
 /// Detach key: Ctrl-\ (0x1C). Rarely used by TUIs (SIGQUIT char).
 const DETACH_BYTE: u8 = 0x1c;
 
-pub fn run(socket: &Path, session: &str) -> Result<()> {
+pub fn run(socket: &Path, session: &str, mode: AttachMode) -> Result<()> {
     let mut stream = UnixStream::connect(socket).context("connect to daemon")?;
     let reader = BufReader::new(stream.try_clone()?);
 
@@ -22,15 +31,19 @@ pub fn run(socket: &Path, session: &str) -> Result<()> {
         &mut stream,
         &Request::Attach {
             session: session.to_string(),
+            mode,
         },
     )?;
     let (rows, cols) = term_size();
     send(&mut stream, &Request::Resize { rows, cols })?;
+    forward_winch(stream.try_clone()?)?;
 
     let _raw = RawMode::enter()?;
     let mut out = std::io::stdout().lock();
     // Alternate screen + clear, so we restore the user's terminal on detach.
-    out.write_all(b"\x1b[?1049h\x1b[2J")?;
+    // (In bytes mode the replayed dump re-enters alt screen itself if the
+    // session is using it; nesting is harmless.)
+    out.write_all(b"\x1b[?1049h\x1b[2J\x1b[H")?;
     out.flush()?;
 
     // Stdin -> daemon.
@@ -69,6 +82,10 @@ pub fn run(socket: &Path, session: &str) -> Result<()> {
         let line = line?;
         match serde_json::from_str::<Response>(&line) {
             Ok(Response::Frame { frame }) => render(&mut out, &frame)?,
+            Ok(Response::Bytes { data }) => {
+                out.write_all(&data)?;
+                out.flush()?;
+            }
             Ok(Response::Exited { code }) => {
                 exit_note = format!("session exited (code {:?})", code);
                 break;
@@ -81,10 +98,53 @@ pub fn run(socket: &Path, session: &str) -> Result<()> {
         }
     }
 
-    out.write_all(b"\x1b[?1049l")?;
+    if mode == AttachMode::Bytes {
+        // The replayed dump may have set modes (mouse tracking, bracketed
+        // paste, margins); reset them before handing the terminal back.
+        out.write_all(b"\x1b[!p\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?2004l")?;
+    }
+    out.write_all(b"\x1b[?1049l\x1b[0m\x1b[?25h")?;
     out.flush()?;
     drop(_raw);
     eprintln!("[landline: {exit_note}]");
+    Ok(())
+}
+
+/// SIGWINCH -> Resize. Self-pipe: the handler only does an async-signal-safe
+/// write; a thread reads the pipe and re-measures the terminal. Mandatory
+/// for shim hosting, where the surrounding pane resizes under us.
+fn forward_winch(mut stream: UnixStream) -> Result<()> {
+    static PIPE_W: AtomicI32 = AtomicI32::new(-1);
+    extern "C" fn on_winch(_: libc::c_int) {
+        let fd = PIPE_W.load(Ordering::Relaxed);
+        if fd >= 0 {
+            // SAFETY: write(2) is async-signal-safe; fd outlives the process.
+            unsafe { libc::write(fd, b"w".as_ptr().cast(), 1) };
+        }
+    }
+    let mut fds = [0i32; 2];
+    // SAFETY: plain pipe(2) with a stack out-param.
+    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
+        anyhow::bail!("pipe for SIGWINCH failed");
+    }
+    PIPE_W.store(fds[1], Ordering::Relaxed);
+    // SAFETY: installing a handler that only touches async-signal-safe state.
+    unsafe { libc::signal(libc::SIGWINCH, on_winch as *const () as libc::sighandler_t) };
+    let read_fd = fds[0];
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 16];
+        loop {
+            // SAFETY: blocking read on our own pipe fd.
+            let n = unsafe { libc::read(read_fd, buf.as_mut_ptr().cast(), buf.len()) };
+            if n <= 0 {
+                break;
+            }
+            let (rows, cols) = term_size();
+            if send(&mut stream, &Request::Resize { rows, cols }).is_err() {
+                break;
+            }
+        }
+    });
     Ok(())
 }
 

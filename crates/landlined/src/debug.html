@@ -1,0 +1,131 @@
+<!doctype html>
+<!-- Throwaway M3 debug page: validates both attach modes over WebSocket.
+     frames mode is hand-rendered into a cell grid (what the mobile client
+     will do); bytes mode is fed straight into a stock browser emulator. -->
+<html>
+<head>
+<meta charset="utf-8">
+<title>landline debug</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<style>
+  body { background: #111; color: #ddd; font-family: monospace; margin: 1rem; }
+  input, select, button { background: #222; color: #ddd; border: 1px solid #555; font-family: monospace; }
+  #frames { line-height: 1.15; white-space: pre; outline: none; }
+  #frames span { white-space: pre; }
+  #status { color: #8c8; }
+  #term { margin-top: .5rem; }
+</style>
+</head>
+<body>
+<div>
+  token <input id="token" size="34">
+  session <input id="session" size="10">
+  <select id="mode"><option value="frames">frames</option><option value="bytes">bytes</option></select>
+  <button id="go">attach</button>
+  <button id="lsBtn">ls</button>
+  <span id="status"></span>
+</div>
+<pre id="ls"></pre>
+<div id="term"></div>
+<div id="frames" tabindex="0"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+$("token").value = new URLSearchParams(location.search).get("token")
+  || localStorage.getItem("landline-token") || "";
+
+let ws = null, term = null, grid = [];
+
+const b64enc = bytes => btoa(String.fromCharCode(...bytes));
+const b64dec = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const utf8 = s => new TextEncoder().encode(s);
+
+function connect() {
+  localStorage.setItem("landline-token", $("token").value);
+  if (ws) ws.close();
+  ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent($("token").value)}`);
+  $("status").textContent = "connecting…";
+  return ws;
+}
+
+$("lsBtn").onclick = () => {
+  const w = connect();
+  w.onopen = () => w.send(JSON.stringify({ type: "ls" }));
+  w.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === "sessions") {
+      $("ls").textContent = m.sessions.map(s =>
+        `${s.id}\t${s.name}\t${s.status.state}\t${s.environment}\t${s.cols}x${s.rows}`).join("\n") || "(none)";
+      $("status").textContent = "ok";
+      w.close();
+    }
+  };
+};
+
+$("go").onclick = () => {
+  const mode = $("mode").value;
+  $("ls").textContent = "";
+  $("frames").innerHTML = "";
+  $("term").innerHTML = "";
+  if (term) { term.dispose(); term = null; }
+  if (mode === "bytes") {
+    term = new Terminal({ cols: 80, rows: 24, convertEol: false });
+    term.open($("term"));
+    term.onData(d => sendInput(utf8(d)));
+  }
+  const w = connect();
+  w.onopen = () => {
+    w.send(JSON.stringify({ type: "hello", version: 1 }));
+    w.send(JSON.stringify({ type: "attach", session: $("session").value, mode }));
+  };
+  w.onclose = () => { $("status").textContent += " [closed]"; };
+  w.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === "hello") $("status").textContent = `v${m.version} [${m.features}]`;
+    else if (m.type === "bytes") term && term.write(b64dec(m.data));
+    else if (m.type === "frame") renderFrame(m.frame);
+    else if (m.type === "exited") $("status").textContent = `exited(${m.code})`;
+    else if (m.type === "error") $("status").textContent = `error: ${m.message}`;
+  };
+  if (mode === "frames") $("frames").focus();
+};
+
+function sendInput(bytes) {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "input", data: b64enc(bytes) }));
+}
+
+// --- frames mode: hand-rendered grid, the mobile client's job in miniature ---
+function cellHtml(c) {
+  let style = "";
+  if (c.fg) style += `color:rgb(${c.fg});`;
+  if (c.bg) style += `background:rgb(${c.bg});`;
+  if (c.fl & 1) style += "font-weight:bold;";
+  if (c.fl & 2) style += "font-style:italic;";
+  if (c.fl & 4) style += "text-decoration:underline;";
+  if (c.fl & 8) style += "filter:invert(1);";
+  const t = c.t === "" ? " " : c.t;
+  return `<span style="${style}">${t.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</span>`;
+}
+function rowHtml(cells) {
+  return cells.filter(c => !(c.fl & 64)).map(cellHtml).join("");
+}
+function renderFrame(f) {
+  if (f.kind === "snapshot") grid = new Array(f.rows).fill("");
+  for (const line of f.lines) grid[line.y] = rowHtml(line.cells);
+  $("frames").innerHTML = grid.map(r => `<div>${r || " "}</div>`).join("");
+}
+
+// frames-mode input: minimal keyboard → bytes mapping.
+$("frames").addEventListener("keydown", e => {
+  const map = { Enter: "\r", Backspace: "\x7f", Tab: "\t", Escape: "\x1b",
+    ArrowUp: "\x1b[A", ArrowDown: "\x1b[B", ArrowRight: "\x1b[C", ArrowLeft: "\x1b[D" };
+  let seq = map[e.key];
+  if (!seq && e.key.length === 1 && !e.metaKey) {
+    seq = e.ctrlKey ? String.fromCharCode(e.key.toUpperCase().charCodeAt(0) - 64) : e.key;
+  }
+  if (seq) { sendInput(utf8(seq)); e.preventDefault(); }
+});
+</script>
+</body>
+</html>

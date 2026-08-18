@@ -90,6 +90,32 @@ Three design rules make that hold:
    changes, exits, blocked signals) are usable without attaching at all, so
    orchestrators and dashboards can manage fleets without terminal streams.
 
+### The shim pattern: hosting landline sessions in other frontends
+
+Because `landline attach --mode bytes` turns any session into an ordinary
+local PTY-producing command, **any frontend that can run a command in a pane
+can host a landline session** — terminal-native multiplexers, desktop IDEs
+with embedded terminals, plain tmux, a bare terminal. The host sees a normal
+process emitting normal escape codes; the process is a thin client relaying a
+session that actually lives in `landlined` (possibly inside a container the
+host knows nothing about). Resizes propagate (the shim forwards SIGWINCH),
+closing the pane merely detaches, and the mid-session reconstruction snapshot
+means the pane shows the live screen instantly.
+
+The push direction — a session spawned from the phone automatically
+appearing as a pane in a running frontend — composes from two generic
+primitives, so nothing frontend-specific lives in the core:
+
+- **Lifecycle events** on the control plane (`watch`): session created /
+  exited, carrying the session info.
+- **Lifecycle hooks** in daemon config: `on session_created`, run a
+  user-configured command with `LANDLINE_SESSION_*` env vars.
+
+A per-frontend adapter is then a small script: subscribe (or hook), call the
+host frontend's own spawn surface with `landline attach --mode bytes <id>` as
+the command. Adapters live outside this repo; extensibility here means the
+daemon's job ends at events + hooks + the bytes shim.
+
 Later bridges, not core: an ACP session type (chat-altitude clients), AHP
 alignment for multi-client turn semantics, and possibly the tmux
 control-mode dialect so terminals that already speak it can attach natively.
@@ -222,13 +248,16 @@ Rules:
   the data registries: SpawnSpec, environment specs, harness profiles,
   templates with params. *Proves the environment abstraction with two real
   impls before host assumptions bake in.*
-- **M3 — network protocol + interop**: axum WebSocket server; `bytes`
-  attach mode with VT-reconstruction snapshot; `docs/PROTOCOL.md` with
-  version/capability negotiation; final-screen retention for exited
-  sessions (today the VT thread ends with the child, so postmortem attach
-  shows nothing — the last screen should stay servable); throwaway xterm.js debug page validating
-  both attach modes remotely (frames mode hand-rendered, bytes mode fed
-  straight into the page's emulator).
+- **M3 — network protocol + interop**: axum WebSocket server (token-gated);
+  `bytes` attach mode with VT-reconstruction snapshot; SIGWINCH propagation
+  in the attach client (mandatory for shim hosting); lifecycle events
+  (`watch`) + daemon config hooks (`session_created`/`session_exited`);
+  `docs/PROTOCOL.md` with version/capability negotiation; final-screen
+  retention for exited sessions (today the VT thread ends with the child, so
+  postmortem attach shows nothing — the last screen should stay servable);
+  throwaway xterm.js debug page validating both attach modes remotely
+  (frames mode hand-rendered, bytes mode fed straight into the page's
+  emulator).
 - **M4 — mobile v0**: Expo app, direct connect (LAN/Tailscale): session list,
   spawn/kill (template picker + params form), Skia terminal render,
   keyboard input.
