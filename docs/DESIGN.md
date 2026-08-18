@@ -237,6 +237,34 @@ Rules:
 - Later, not core: consuming `devcontainer.json` as an environment source for
   docker environments.
 
+## Responsiveness budget
+
+"Feels instant" is a measured budget, not a vibe. Targets:
+
+- keystroke → painted echo ≤ network RTT + 25 ms
+- attach → first paint ≤ 100 ms on LAN (serve cached last-known frame
+  immediately, reconcile when the fresh snapshot lands)
+- scrolling at native refresh rate, entirely client-local
+
+What enforces it, by layer:
+
+- **Daemon**: adaptive frame tick — after a quiet period the first diff is
+  emitted immediately, so interactive echo never waits out the coalescing
+  interval; only continuous output is coalesced on the 16 ms tick. Input is
+  written to the PTY per event, never batched. `TCP_NODELAY` on every hop.
+- **Client**: dirty-row-only repaint with a cached laid-out paragraph per
+  row; local scrollback cache so flicks never round-trip; optimistic
+  control-plane UI (spawn/kill update the list in a pending state,
+  reconciled by `watch` events); a debug overlay showing echo RTT and frame
+  age so regressions are visible the day they happen.
+- **Relay (M5)**: a dumb byte pipe — no parsing, no queuing — deployed near
+  the user; prefer direct LAN/tunnel paths when reachable, relay as
+  fallback.
+- **Later**: mosh-style predictive local echo (client paints typed
+  characters immediately, marked until confirmed). State-sync frames make
+  this safe — an authoritative frame cleanly overwrites any misprediction.
+  This is the single biggest perceived-latency win on high-RTT links.
+
 ## Milestones
 
 - **M1 — runtime core**: `Environment` trait with `host` impl, spawn a
@@ -258,9 +286,14 @@ Rules:
   throwaway xterm.js debug page validating both attach modes remotely
   (frames mode hand-rendered, bytes mode fed straight into the page's
   emulator).
-- **M4 — mobile v0**: Expo app, direct connect (LAN/Tailscale): session list,
-  spawn/kill (template picker + params form), Skia terminal render,
-  keyboard input.
+- **M4 — mobile v0**: Expo app, direct connect (LAN/Tailscale): session list
+  kept live by `watch`, spawn/kill (template picker + params form), Skia
+  terminal render, keyboard input incl. special-keys bar, in-app latency
+  overlay (echo RTT, frame age). Distribution: CI (macOS runner) builds an
+  unsigned iOS `.ipa` published via a SideStore source feed — milestone
+  exit is a SideStore link an iOS user can install from (no App Store, no
+  paid dev account; users re-sign with their own Apple ID). Android gets
+  the same via a release APK.
 - **M5 — relay + pairing**: hosted relay, QR pairing, E2E encryption, push
   notifications on blocked/done.
 - **M6 — orchestration**: agent-facing CLI (`spawn`/`send`/`wait`), message
@@ -273,8 +306,8 @@ Rules:
 ```
 crates/landlined/      # daemon + CLI (one binary)
 crates/proto/           # wire protocol types, shared by daemon & relay
-crates/relay/           # M4
-apps/mobile/            # Expo app
+crates/relay/           # M5
+apps/mobile/            # Expo app (M4)
 docs/
 ```
 
@@ -292,5 +325,6 @@ docs/
   byte-mode attach mid-session shows the live screen instantly; a
   third-party terminal fed the byte stream renders identically.
 - M4: on-device: spawn from phone into a docker environment, drive a Claude
-  Code session, kill it.
+  Code session, kill it; a fresh iOS device installs the app from the
+  published SideStore source link.
 - M6: one session spawns a second and receives its "done" event.

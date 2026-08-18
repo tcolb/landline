@@ -33,9 +33,15 @@ pub async fn run(addr: SocketAddr, registry: Arc<Registry>) -> Result<()> {
         .route("/", get(page))
         .route("/ws", get(upgrade))
         .with_state(state);
+    use axum::serve::ListenerExt;
+    // Keystroke-sized packets must never wait on Nagle (responsiveness
+    // budget, docs/DESIGN.md).
     let listener = tokio::net::TcpListener::bind(addr)
         .await
-        .with_context(|| format!("bind {addr}"))?;
+        .with_context(|| format!("bind {addr}"))?
+        .tap_io(|stream| {
+            let _ = stream.set_nodelay(true);
+        });
     tracing::info!(
         "websocket API on http://{addr}/ (token in {})",
         paths::ws_token_path().display()

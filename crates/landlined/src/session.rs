@@ -169,6 +169,20 @@ fn vt_loop(
     ctl_rx: &xchan::Receiver<Ctl>,
 ) {
     let mut pending = false; // wrote bytes since last diff?
+    let mut last_emit = std::time::Instant::now() - FRAME_INTERVAL;
+    // Adaptive tick: after a quiet period the first diff goes out at once,
+    // so interactive echo never waits out the coalescing interval; only
+    // continuous output is coalesced on the tick (see the responsiveness
+    // budget in docs/DESIGN.md).
+    macro_rules! emit_now {
+        () => {
+            if let Some(frame) = screen.diff() {
+                let _ = session.events.send(Event::Frame(frame));
+            }
+            last_emit = std::time::Instant::now();
+            pending = false;
+        };
+    }
     loop {
         xchan::select! {
             recv(out_rx) -> msg => match msg {
@@ -178,7 +192,11 @@ fn vt_loop(
                     while let Ok(more) = out_rx.try_recv() {
                         screen.write(&more);
                     }
-                    pending = true;
+                    if last_emit.elapsed() >= FRAME_INTERVAL {
+                        emit_now!();
+                    } else {
+                        pending = true;
+                    }
                 }
                 Err(_) => { /* reader gone; keep serving ctl until exit */ }
             },
@@ -199,7 +217,8 @@ fn vt_loop(
                         info.rows = rows;
                         info.cols = cols;
                     }
-                    pending = true;
+                    // Resize is interactive; repaint without waiting.
+                    emit_now!();
                 }
                 Ok(Ctl::ChildExited { code }) => {
                     // Flush any final output that raced the exit.
@@ -222,10 +241,7 @@ fn vt_loop(
             },
             default(FRAME_INTERVAL) => {
                 if pending {
-                    pending = false;
-                    if let Some(frame) = screen.diff() {
-                        let _ = session.events.send(Event::Frame(frame));
-                    }
+                    emit_now!();
                 }
             },
         }
