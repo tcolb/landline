@@ -16,6 +16,9 @@ import {
 } from "@shopify/react-native-skia";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Keyboard,
+  KeyboardAvoidingView,
+  PanResponder,
   Platform,
   Pressable,
   StyleSheet,
@@ -44,6 +47,7 @@ const FONT_SIZE = 12;
 // Lazily initialized on first Terminal mount instead.
 interface FontInfo {
   font: SkFont;
+  boldFont: SkFont;
   cellW: number;
   cellH: number;
   baseline: number;
@@ -53,15 +57,65 @@ function getFontInfo(): FontInfo {
   if (!fontInfo) {
     const fontFamily = Platform.select({ ios: "Menlo", default: "monospace" });
     const font = matchFont({ fontFamily, fontSize: FONT_SIZE });
+    const boldFont = matchFont({ fontFamily, fontSize: FONT_SIZE, fontWeight: "bold" });
     const metrics = font.getMetrics();
     fontInfo = {
       font,
+      boldFont,
       cellW: font.getTextWidth("0"),
       cellH: Math.ceil(-metrics.ascent + metrics.descent),
       baseline: Math.ceil(-metrics.ascent),
     };
   }
   return fontInfo;
+}
+
+// Block elements (U+2580–U+259F) drawn as glyphs leave seams and stray
+// gaps — fonts don't fill the cell box exactly. Terminals draw them as
+// filled rects; returns true when the char was handled that way.
+// Fractions are eighths; quadrant chars use a UL/UR/LL/LR bitmask.
+const QUADRANTS: Record<string, number> = {
+  "▖": 0b0010, "▗": 0b0001, "▘": 0b1000, "▙": 0b1011,
+  "▚": 0b1001, "▛": 0b1110, "▜": 0b1101, "▝": 0b0100,
+  "▞": 0b0110, "▟": 0b0111,
+};
+function drawBlockChar(
+  canvas: { drawRect(rect: unknown, paint: unknown): void },
+  ch: string,
+  px: number,
+  py: number,
+  w: number,
+  h: number,
+  paint: unknown,
+  shadePaint: (alpha: number) => unknown,
+): boolean {
+  const code = ch.codePointAt(0) ?? 0;
+  if (code < 0x2580 || code > 0x259f) return false;
+  const rect = (x: number, y: number, rw: number, rh: number) =>
+    canvas.drawRect(Skia.XYWHRect(px + x, py + y, rw, rh), paint);
+  if (code === 0x2588) rect(0, 0, w, h); // full block
+  else if (code === 0x2580) rect(0, 0, w, h / 2); // upper half
+  else if (code >= 0x2581 && code <= 0x2587) {
+    const k = (code - 0x2580) / 8; // lower eighths ▁..▇
+    rect(0, h * (1 - k), w, h * k);
+  } else if (code === 0x258c) rect(0, 0, w / 2, h); // left half
+  else if (code >= 0x2589 && code <= 0x258f) {
+    const k = (0x2590 - code) / 8; // left eighths ▉..▏
+    rect(0, 0, w * k, h);
+  } else if (code === 0x2590) rect(w / 2, 0, w / 2, h); // right half
+  else if (code === 0x2591) canvas.drawRect(Skia.XYWHRect(px, py, w, h), shadePaint(0.25));
+  else if (code === 0x2592) canvas.drawRect(Skia.XYWHRect(px, py, w, h), shadePaint(0.5));
+  else if (code === 0x2593) canvas.drawRect(Skia.XYWHRect(px, py, w, h), shadePaint(0.75));
+  else if (code === 0x2594) rect(0, 0, w, h / 8); // upper eighth
+  else if (code === 0x2595) rect(w * (7 / 8), 0, w / 8, h); // right eighth
+  else {
+    const q = QUADRANTS[ch] ?? 0;
+    if (q & 0b1000) rect(0, 0, w / 2, h / 2);
+    if (q & 0b0100) rect(w / 2, 0, w / 2, h / 2);
+    if (q & 0b0010) rect(0, h / 2, w / 2, h / 2);
+    if (q & 0b0001) rect(w / 2, h / 2, w / 2, h / 2);
+  }
+  return true;
 }
 
 interface Props {
@@ -106,7 +160,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
   }, []);
 
   const repaintInner = useCallback(() => {
-    const { font, cellW: CELL_W, cellH: CELL_H, baseline: BASELINE } = getFontInfo();
+    const { font, boldFont, cellW: CELL_W, cellH: CELL_H, baseline: BASELINE } = getFontInfo();
     const rows = grid.current.length;
     if (rows === 0) return;
     const cols = grid.current[0]?.length ?? 0;
@@ -132,9 +186,16 @@ export function Terminal({ cfg, session, onBack }: Props) {
       let run = "";
       let runStart = 0;
       let runColor = "";
+      let runBold = false;
       const flush = () => {
         if (run !== "") {
-          canvas.drawText(run, runStart * CELL_W, baseY, paintFor(runColor), font);
+          canvas.drawText(
+            run,
+            runStart * CELL_W,
+            baseY,
+            paintFor(runColor),
+            runBold ? boldFont : font,
+          );
         }
         run = "";
       };
@@ -148,25 +209,41 @@ export function Terminal({ cfg, session, onBack }: Props) {
         const fgTriple = inverse ? (c.bg ?? [13, 17, 23]) : c.fg;
         let color = fgTriple ? `rgb(${fgTriple[0]},${fgTriple[1]},${fgTriple[2]})` : FG;
         if (c.fl & FLAG_FAINT) color = color === FG ? "#8b949e" : color;
-        if (color !== runColor && run !== "") flush();
+        const bold = (c.fl & FLAG_BOLD) !== 0;
+        const t = c.t === "" ? " " : c.t;
+        // Box-art blocks render as rects, not glyphs (no font seams).
+        if (
+          drawBlockChar(
+            canvas,
+            t,
+            x * CELL_W,
+            y * CELL_H,
+            CELL_W,
+            CELL_H,
+            paintFor(color),
+            (alpha) => {
+              const key = `${color}@${alpha}`;
+              let p = paints.current.get(key);
+              if (!p) {
+                p = Skia.Paint();
+                p.setColor(Skia.Color(color));
+                p.setAlphaf(alpha);
+                paints.current.set(key, p);
+              }
+              return p;
+            },
+          )
+        ) {
+          flush();
+          continue;
+        }
+        if ((color !== runColor || bold !== runBold) && run !== "") flush();
         if (run === "") {
           runStart = x;
           runColor = color;
+          runBold = bold;
         }
-        run += c.t === "" ? " " : c.t;
-        if (c.fl & FLAG_BOLD) {
-          // Cheap bold: overdraw shifted by half a pixel.
-          flush();
-          canvas.drawText(
-            line[x].t || " ",
-            x * CELL_W + 0.5,
-            baseY,
-            paintFor(color),
-            font,
-          );
-          runStart = x + 1;
-          runColor = color;
-        }
+        run += t;
       }
       flush();
     }
@@ -194,10 +271,56 @@ export function Terminal({ cfg, session, onBack }: Props) {
         if (row.y < grid.current.length) grid.current[row.y] = row.cells;
       }
       cursor.current = frame.cursor;
+      if (frame.mouse !== undefined) mouseMode.current = frame.mouse;
       repaint();
     },
     [repaint],
   );
+
+  // Swipe → scroll. With mouse tracking on (claude, vim, htop) swipes
+  // become SGR wheel events at the touch position; otherwise arrow keys —
+  // the same translation desktop terminals do for alt-screen apps.
+  const mouseMode = useRef(false);
+  const panLastDy = useRef(0);
+  const panAccum = useRef(0);
+  const panCell = useRef({ col: 1, row: 1 });
+  const sendScroll = useCallback((up: boolean) => {
+    if (mouseMode.current) {
+      const { col, row } = panCell.current;
+      handle.current?.send(inputMessage(`\x1b[<${up ? 64 : 65};${col};${row}M`));
+    } else {
+      handle.current?.send(inputMessage(up ? "\x1b[A" : "\x1b[B"));
+    }
+  }, []);
+  const pan = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6,
+      onPanResponderGrant: (e) => {
+        panLastDy.current = 0;
+        panAccum.current = 0;
+        const { cellW, cellH } = getFontInfo();
+        panCell.current = {
+          col: Math.max(1, Math.floor(e.nativeEvent.locationX / cellW) + 1),
+          row: Math.max(1, Math.floor(e.nativeEvent.locationY / cellH) + 1),
+        };
+      },
+      onPanResponderMove: (_e, g) => {
+        const { cellH } = getFontInfo();
+        panAccum.current += g.dy - panLastDy.current;
+        panLastDy.current = g.dy;
+        // Finger down reveals earlier content = wheel/arrow up.
+        while (Math.abs(panAccum.current) >= cellH) {
+          const up = panAccum.current > 0;
+          panAccum.current += up ? -cellH : cellH;
+          sendScroll(up);
+        }
+      },
+      onPanResponderRelease: (_e, g) => {
+        if (Math.abs(g.dy) < 6 && Math.abs(g.dx) < 6) inputRef.current?.focus();
+      },
+    }),
+  ).current;
 
   useEffect(() => {
     let alive = true;
@@ -256,7 +379,10 @@ export function Terminal({ cfg, session, onBack }: Props) {
   const rows = grid.current.length;
 
   return (
-    <View style={styles.root}>
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
       <View style={styles.bar}>
         <Pressable onPress={onBack} style={styles.key}>
           <Text style={styles.keyText}>‹ back</Text>
@@ -267,15 +393,15 @@ export function Terminal({ cfg, session, onBack }: Props) {
           {status ? ` · ${status}` : ""}
         </Text>
       </View>
-      <Pressable
+      <View
         style={styles.canvasWrap}
-        onPress={() => inputRef.current?.focus()}
+        {...pan.panHandlers}
         onLayout={(e) =>
           setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })
         }
       >
         <Canvas style={styles.canvas}>{picture && <Picture picture={picture} />}</Canvas>
-      </Pressable>
+      </View>
       <View style={styles.keys}>
         {key("esc", "\x1b")}
         {key("tab", "\t")}
@@ -286,6 +412,9 @@ export function Terminal({ cfg, session, onBack }: Props) {
         {key("↑", "\x1b[A")}
         {key("→", "\x1b[C")}
         {key("⌫", "\x7f")}
+        <Pressable style={styles.key} onPress={() => Keyboard.dismiss()}>
+          <Text style={styles.keyText}>⌄⌨</Text>
+        </Pressable>
       </View>
       <TextInput
         ref={inputRef}
@@ -303,7 +432,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
         autoFocus
         multiline={false}
       />
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

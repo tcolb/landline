@@ -30,8 +30,16 @@ export interface Cursor {
 }
 
 export type Frame =
-  | { kind: "snapshot"; rows: number; cols: number; lines: RowData[]; cursor: Cursor }
-  | { kind: "diff"; lines: RowData[]; cursor: Cursor };
+  | {
+      kind: "snapshot";
+      rows: number;
+      cols: number;
+      lines: RowData[];
+      cursor: Cursor;
+      /** Mouse tracking active in the session (swipe → wheel codes). */
+      mouse?: boolean;
+    }
+  | { kind: "diff"; lines: RowData[]; cursor: Cursor; mouse?: boolean };
 
 export type SessionStatus =
   | { state: "running" }

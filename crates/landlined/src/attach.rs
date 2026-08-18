@@ -161,7 +161,7 @@ fn render(out: &mut impl Write, frame: &Frame) -> Result<()> {
             out.write_all(b"\x1b[2J")?;
             (lines, cursor)
         }
-        Frame::Diff { lines, cursor } => (lines, cursor),
+        Frame::Diff { lines, cursor, .. } => (lines, cursor),
     };
     out.write_all(b"\x1b[?25l")?;
     for row in lines {

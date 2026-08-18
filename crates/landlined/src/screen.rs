@@ -154,6 +154,7 @@ impl Screen for GhosttyScreen {
 
     fn snapshot(&mut self) -> Frame {
         let (rows, cols) = (self.term.rows().unwrap_or(0), self.term.cols().unwrap_or(0));
+        let mouse = self.term.is_mouse_tracking().unwrap_or(false);
         match self.state.update(&self.term) {
             Ok(snap) => {
                 let _ = snap.set_dirty(Dirty::Clean);
@@ -165,6 +166,7 @@ impl Screen for GhosttyScreen {
                     cols,
                     lines,
                     cursor,
+                    mouse,
                 }
             }
             Err(_) => Frame::Snapshot {
@@ -176,6 +178,7 @@ impl Screen for GhosttyScreen {
                     y: 0,
                     visible: false,
                 },
+                mouse,
             },
         }
     }
@@ -208,6 +211,7 @@ impl Screen for GhosttyScreen {
     }
 
     fn diff(&mut self) -> Option<Frame> {
+        let mouse = self.term.is_mouse_tracking().unwrap_or(false);
         let snap = self.state.update(&self.term).ok()?;
         let dirty = snap.dirty().ok()?;
         match dirty {
@@ -219,9 +223,17 @@ impl Screen for GhosttyScreen {
                 let cursor = Self::cursor(&snap);
                 if lines.is_empty() {
                     // Cursor-only change.
-                    Some(Frame::Diff { lines, cursor })
+                    Some(Frame::Diff {
+                        lines,
+                        cursor,
+                        mouse,
+                    })
                 } else {
-                    Some(Frame::Diff { lines, cursor })
+                    Some(Frame::Diff {
+                        lines,
+                        cursor,
+                        mouse,
+                    })
                 }
             }
             Dirty::Full => {
@@ -235,6 +247,7 @@ impl Screen for GhosttyScreen {
                     cols,
                     lines,
                     cursor,
+                    mouse,
                 })
             }
         }

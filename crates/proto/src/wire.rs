@@ -206,6 +206,8 @@ pub struct Cursor {
 
 /// Screen content pushed to attached clients. A `Snapshot` fully replaces
 /// client state; a `Diff` carries only rows that changed since the last frame.
+/// `mouse` reports whether the session has mouse tracking enabled, so
+/// clients can translate scroll gestures into wheel events vs arrow keys.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Frame {
@@ -214,9 +216,13 @@ pub enum Frame {
         cols: u16,
         lines: Vec<RowData>,
         cursor: Cursor,
+        #[serde(default)]
+        mouse: bool,
     },
     Diff {
         lines: Vec<RowData>,
         cursor: Cursor,
+        #[serde(default)]
+        mouse: bool,
     },
 }

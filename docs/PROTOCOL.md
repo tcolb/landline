@@ -91,6 +91,11 @@ Cell fields: `t` — full grapheme cluster as UTF-8 (empty = blank); `fg`/`bg`
 4 underline, 8 inverse, 16 faint, 32 strikethrough, 64 wide-spacer (a
 continuation cell of a wide grapheme; render nothing, the base cell spans).
 
+Frames also carry `mouse` (boolean, default false): whether the session has
+mouse tracking enabled. Clients use it to translate scroll gestures — SGR
+wheel events (`ESC [<64;col;row M` / `65`) when true, arrow keys when
+false.
+
 ### Attached state (`mode: "bytes"`)
 
 For clients with their own terminal emulator — tmux-attach semantics. This
