@@ -1,0 +1,22 @@
+# mise is this project's tool + package manager.
+# https://mise.jdx.dev
+#
+# Pin every language runtime and CLI dependency here so `mise install` is the
+# only bootstrap step. Do not rely on system-installed toolchains.
+
+[tools]
+rust = "stable"      # landlined runtime, CLI, relay (crates/)
+node = "22"          # Expo / React Native mobile app (apps/mobile)
+pnpm = "latest"
+zig = "0.14"        # build dep of libghostty-vt
+
+[tasks]
+# Project tasks live here so `mise run <task>` is the single entry point.
+# Add build/test/lint tasks as the workspaces land, e.g.:
+#   build = "cargo build"
+#   test  = "cargo test"
+#   lint  = "cargo clippy -- -D warnings"
+
+[settings]
+# Fail loudly instead of silently falling back to a system tool.
+not_found_auto_install = false
