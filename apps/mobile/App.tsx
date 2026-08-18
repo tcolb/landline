@@ -68,14 +68,18 @@ export default function App() {
 
   // CI-only: EXPO_PUBLIC_AUTOTEST is inlined at bundle time for the
   // simulator smoke build (never the shipped ipa); it drives straight into
-  // a terminal against the mock daemon on the runner.
+  // a terminal against the mock daemon on the runner. Must wait for store
+  // hydration: rehydrating from empty storage after this effect would
+  // clobber the config back to null and land on the connect screen.
   useEffect(() => {
+    console.log(`landline autotest=${process.env.EXPO_PUBLIC_AUTOTEST ?? "unset"} hydrated=${hydrated}`);
+    if (!hydrated) return;
     if (process.env.EXPO_PUBLIC_AUTOTEST === "1") {
       setConfig({ host: "127.0.0.1:7181", token: "autotest" });
       setConnected(true);
       setScreen({ name: "terminal", session: "s1" });
     }
-  }, [setConfig]);
+  }, [hydrated, setConfig]);
 
   // Uncaught errors outside render (event handlers, timers, WS callbacks)
   // bypass the ErrorBoundary; surface them as text too.

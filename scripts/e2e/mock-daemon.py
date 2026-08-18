@@ -129,6 +129,7 @@ def handle(sock, addr):
             elif t == "watch":
                 conn.send_json({"type": "ok"})
             elif t == "attach":
+                print("ATTACHED", msg.get("session"), flush=True)
                 conn.send_json({"type": "frame", "frame": snapshot()})
                 attached = True
                 threading.Thread(target=ticker, args=(conn,), daemon=True).start()

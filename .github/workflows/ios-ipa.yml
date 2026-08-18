@@ -202,6 +202,12 @@ jobs:
             echo "APP PROCESS DIED"
             exit 1
           fi
+          # The screenshot alone can pass on the wrong screen; require the
+          # app to have actually attached to the mock session.
+          if ! grep -q "ATTACHED" mock-daemon.log; then
+            echo "APP NEVER ATTACHED TO THE MOCK DAEMON"
+            exit 1
+          fi
 
       - name: Upload simulator artifacts
         if: always()
