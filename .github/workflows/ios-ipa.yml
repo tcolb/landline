@@ -42,7 +42,7 @@ jobs:
 
       - name: Build (unsigned)
         run: |
-          set -o pipefail
+          set +e
           xcodebuild \
             -workspace ios/landline.xcworkspace \
             -scheme landline \
@@ -52,7 +52,30 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build | tail -100
+            build > xcodebuild.log 2>&1
+          status=$?
+          if [ $status -ne 0 ]; then
+            echo "===== error lines ====="
+            grep -nE "(^|\s)error:|fatal error|Command PhaseScriptExecution failed" xcodebuild.log | head -60
+            echo "===== failing script phase context ====="
+            grep -n "PhaseScriptExecution" xcodebuild.log | tail -5
+            awk '/PhaseScriptExecution/{p=NR} END{print p}' xcodebuild.log | while read -r n; do
+              [ -n "$n" ] && sed -n "${n},$((n+120))p" xcodebuild.log
+            done
+            echo "===== tail ====="
+            tail -120 xcodebuild.log
+          else
+            tail -20 xcodebuild.log
+          fi
+          exit $status
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: apps/mobile/xcodebuild.log
+          if-no-files-found: ignore
 
       - name: Package .ipa
         run: |
