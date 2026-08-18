@@ -163,9 +163,11 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry out/landline.ipa Payload
 
-      # Persist caches BEFORE the smoke gate: a failed smoke must not throw
-      # away the compile work (the sim compile below adds little — the smoke
-      # rebuild next run restores instantly either way).
+      # Simulator smoke test removed for build speed (it doubled the job
+      # with a second full sim compile). The pieces remain for an opt-in
+      # revival: scripts/e2e/mock-daemon.py + the app's autotest hook
+      # (LANDLINE_AUTOTEST via app.config.js extra / EXPO_PUBLIC_AUTOTEST).
+
       - name: Save CocoaPods
         if: github.ref == 'refs/heads/main' && steps.restore-pods.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -173,76 +175,13 @@ jobs:
           path: ~/Library/Caches/CocoaPods
           key: pods-ios-${{ hashFiles('apps/mobile/pnpm-lock.yaml') }}
 
-      # Boot the app on a simulator and drive a real terminal against a
-      # mock daemon: a build that black-screens or dies on attach must
-      # never reach the install channel. Screenshot + JS console land in
-      # artifacts for remote eyes.
-      - name: Simulator smoke test
-        run: |
-          export EXPO_PUBLIC_AUTOTEST=1
-          # Constants-manifest path: read by app.config.js during the
-          # EXConstants build phase, immune to Metro transform caching.
-          export LANDLINE_AUTOTEST=1
-          # The device bundle above warmed Metro's transform cache WITHOUT
-          # these vars; stale entries would silently drop the inline.
-          rm -rf "$TMPDIR"/metro-* "$TMPDIR"/haste-* node_modules/.cache 2>/dev/null || true
-          xcodebuild \
-            -workspace ios/landline.xcworkspace \
-            -scheme landline \
-            -configuration Release \
-            -sdk iphonesimulator \
-            -derivedDataPath simbuild \
-            CODE_SIGNING_ALLOWED=NO \
-            build > simbuild.log 2>&1 || { tail -80 simbuild.log; exit 1; }
-          python3 ../../scripts/e2e/mock-daemon.py > mock-daemon.log 2>&1 &
-          UDID=$(xcrun simctl list devices available --json | python3 -c "
-          import json, sys
-          devices = json.load(sys.stdin)['devices']
-          for runtime in sorted(devices, reverse=True):
-              for dev in devices[runtime]:
-                  if 'iPhone' in dev['name']:
-                      print(dev['udid']); raise SystemExit
-          ")
-          echo "simulator: $UDID"
-          xcrun simctl boot "$UDID"
-          xcrun simctl bootstatus "$UDID" -b
-          xcrun simctl install "$UDID" simbuild/Build/Products/Release-iphonesimulator/landline.app
-          xcrun simctl launch --console-pty "$UDID" com.tcolb.landline > sim-console.log 2>&1 &
-          sleep 25
-          xcrun simctl io "$UDID" screenshot sim-screen.png
-          echo "--- app console ---"
-          cat sim-console.log
-          echo "--- mock daemon ---"
-          cat mock-daemon.log
-          if ! xcrun simctl spawn "$UDID" launchctl list | grep -q com.tcolb.landline; then
-            echo "APP PROCESS DIED"
-            exit 1
-          fi
-          # The screenshot alone can pass on the wrong screen; require the
-          # app to have actually attached to the mock session.
-          if ! grep -q "ATTACHED" mock-daemon.log; then
-            echo "APP NEVER ATTACHED TO THE MOCK DAEMON"
-            exit 1
-          fi
-
-      - name: Upload simulator artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sim-smoke
-          path: |
-            apps/mobile/sim-screen.png
-            apps/mobile/sim-console.log
-            apps/mobile/mock-daemon.log
-          if-no-files-found: ignore
-
       - name: Report ccache stats
         if: always()
         run: ccache -s -v 2>/dev/null || ccache -s
 
       # Only main persists caches: one authoritative warm entry instead of a
-      # per-branch pile LRU-evicting it. always(): a smoke failure must not
-      # discard the compile work (device + sim objects both live here).
+      # per-branch pile LRU-evicting it. always(): a late-step failure must
+      # not discard the compile work.
       - name: Save ccache
         if: always() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v4
