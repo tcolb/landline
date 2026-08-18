@@ -1,6 +1,6 @@
 {
   "name": "landline-mobile",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "main": "index.ts",
   "dependencies": {
     "@legendapp/list": "^3.3.6",

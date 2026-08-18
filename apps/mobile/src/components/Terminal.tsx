@@ -49,6 +49,7 @@ const FONT_SIZE = 12;
 interface FontInfo {
   font: SkFont;
   boldFont: SkFont;
+  family: string;
   cellW: number;
   cellH: number;
   baseline: number;
@@ -56,19 +57,59 @@ interface FontInfo {
 let fontInfo: FontInfo | null = null;
 function getFontInfo(): FontInfo {
   if (!fontInfo) {
-    const fontFamily = Platform.select({ ios: "Menlo", default: "monospace" });
-    const font = matchFont({ fontFamily, fontSize: FONT_SIZE });
-    const boldFont = matchFont({ fontFamily, fontSize: FONT_SIZE, fontWeight: "bold" });
+    // Don't trust a family name to resolve: if matchFont silently falls
+    // back to a proportional face, real glyph advances exceed the assumed
+    // cell width and the grid runs off the screen edge. Verify
+    // monospacedness (i and W same advance) and walk candidates.
+    const candidates: string[] = Platform.select({
+      ios: ["Menlo", "Courier New", "Courier"],
+      default: ["monospace", "Droid Sans Mono", "Courier New"],
+    })!;
+    let family = candidates[candidates.length - 1];
+    let font = matchFont({ fontFamily: family, fontSize: FONT_SIZE });
+    for (const fam of candidates) {
+      const f = matchFont({ fontFamily: fam, fontSize: FONT_SIZE });
+      const wi = f.getTextWidth("i");
+      if (wi > 0 && Math.abs(wi - f.getTextWidth("W")) < 0.01) {
+        family = fam;
+        font = f;
+        break;
+      }
+    }
+    const boldFont = matchFont({ fontFamily: family, fontSize: FONT_SIZE, fontWeight: "bold" });
     const metrics = font.getMetrics();
     fontInfo = {
       font,
       boldFont,
+      family,
       cellW: font.getTextWidth("0"),
       cellH: Math.ceil(-metrics.ascent + metrics.descent),
       baseline: Math.ceil(-metrics.ascent),
     };
   }
   return fontInfo;
+}
+
+const paintCache = new Map<string, ReturnType<typeof Skia.Paint>>();
+function paintFor(color: string) {
+  let p = paintCache.get(color);
+  if (!p) {
+    p = Skia.Paint();
+    p.setColor(Skia.Color(color));
+    paintCache.set(color, p);
+  }
+  return p;
+}
+function shadePaintFor(color: string, alpha: number) {
+  const key = `${color}@${alpha}`;
+  let p = paintCache.get(key);
+  if (!p) {
+    p = Skia.Paint();
+    p.setColor(Skia.Color(color));
+    p.setAlphaf(alpha);
+    paintCache.set(key, p);
+  }
+  return p;
 }
 
 // Glyph fallback: monospace fonts miss plenty (emoji, ⏵, ❯, CJK) and Skia
@@ -152,6 +193,80 @@ function drawBlockChar(
   return true;
 }
 
+/** Record one row (backgrounds, style-batched text runs, block rects,
+ * glyph fallback) into its own picture, in row-local coordinates. */
+function recordRow(cells: CellData[]): SkPicture {
+  const { font, boldFont, cellW: CELL_W, cellH: CELL_H, baseline: BASELINE } = getFontInfo();
+  const rec = Skia.PictureRecorder();
+  const canvas = rec.beginRecording(
+    Skia.XYWHRect(0, 0, Math.max(1, cells.length) * CELL_W, CELL_H),
+  );
+  for (let x = 0; x < cells.length; x++) {
+    const c = cells[x];
+    const inverse = c.fl & FLAG_INVERSE;
+    const bg = inverse ? (c.fg ?? [201, 209, 217]) : c.bg;
+    if (bg) {
+      canvas.drawRect(
+        Skia.XYWHRect(x * CELL_W, 0, CELL_W, CELL_H),
+        paintFor(`rgb(${bg[0]},${bg[1]},${bg[2]})`),
+      );
+    }
+  }
+  let run = "";
+  let runStart = 0;
+  let runColor = "";
+  let runBold = false;
+  const flush = () => {
+    if (run !== "") {
+      canvas.drawText(
+        run,
+        runStart * CELL_W,
+        BASELINE,
+        paintFor(runColor),
+        runBold ? boldFont : font,
+      );
+    }
+    run = "";
+  };
+  for (let x = 0; x < cells.length; x++) {
+    const c = cells[x];
+    if (c.fl & FLAG_WIDE_SPACER) {
+      run += " "; // keep columns aligned; the wide glyph overdraws
+      continue;
+    }
+    const inverse = c.fl & FLAG_INVERSE;
+    const fgTriple = inverse ? (c.bg ?? [13, 17, 23]) : c.fg;
+    let color = fgTriple ? `rgb(${fgTriple[0]},${fgTriple[1]},${fgTriple[2]})` : FG;
+    if (c.fl & FLAG_FAINT) color = color === FG ? "#8b949e" : color;
+    const bold = (c.fl & FLAG_BOLD) !== 0;
+    const t = c.t === "" ? " " : c.t;
+    // Box-art blocks render as rects, not glyphs (no font seams).
+    if (
+      drawBlockChar(canvas, t, x * CELL_W, 0, CELL_W, CELL_H, paintFor(color), (alpha) =>
+        shadePaintFor(color, alpha),
+      )
+    ) {
+      flush();
+      continue;
+    }
+    const fallback = fontForGlyph(t);
+    if (fallback) {
+      flush();
+      canvas.drawText(t, x * CELL_W, BASELINE, paintFor(color), fallback);
+      continue;
+    }
+    if ((color !== runColor || bold !== runBold) && run !== "") flush();
+    if (run === "") {
+      runStart = x;
+      runColor = color;
+      runBold = bold;
+    }
+    run += t;
+  }
+  flush();
+  return rec.finishRecordingAsPicture();
+}
+
 interface Props {
   cfg: ConnectionConfig;
   session: string;
@@ -173,135 +288,53 @@ export function Terminal({ cfg, session, onBack }: Props) {
   const ctrlRef = useRef(false);
   ctrlRef.current = ctrl;
 
-  const paints = useRef(new Map<string, ReturnType<typeof Skia.Paint>>());
-  const paintFor = (color: string) => {
-    let p = paints.current.get(color);
-    if (!p) {
-      p = Skia.Paint();
-      p.setColor(Skia.Color(color));
-      paints.current.set(color, p);
-    }
-    return p;
-  };
+  // Per-row picture cache: only rows a diff touched are re-recorded; the
+  // final picture just composes cached rows + cursor. This is the
+  // dirty-row-only repaint from the responsiveness budget.
+  const rowPics = useRef<(SkPicture | null)[]>([]);
+  const composeScheduled = useRef(false);
 
-  const repaint = useCallback(() => {
-    try {
-      repaintInner();
-    } catch (e: any) {
-      setStatus(`render error: ${String(e?.message ?? e)}`);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const repaintInner = useCallback(() => {
-    const {
-      font,
-      boldFont,
-      cellW: CELL_W,
-      cellH: CELL_H,
-      baseline: BASELINE,
-    } = getFontInfo();
-    const rows = grid.current.length;
+  const compose = useCallback(() => {
+    const { cellW: CELL_W, cellH: CELL_H } = getFontInfo();
+    const rows = rowPics.current.length;
     if (rows === 0) return;
-    const cols = grid.current[0]?.length ?? 0;
+    let cols = 0;
+    for (const r of grid.current) cols = Math.max(cols, r.length);
     const rec = Skia.PictureRecorder();
     const canvas = rec.beginRecording(
-      Skia.XYWHRect(0, 0, cols * CELL_W, rows * CELL_H),
+      Skia.XYWHRect(0, 0, Math.max(1, cols) * CELL_W, rows * CELL_H),
     );
     for (let y = 0; y < rows; y++) {
-      const line = grid.current[y];
-      const baseY = y * CELL_H + BASELINE;
-      // Backgrounds first, then coalesce same-style text runs.
-      for (let x = 0; x < line.length; x++) {
-        const c = line[x];
-        const inverse = c.fl & FLAG_INVERSE;
-        const bg = inverse ? (c.fg ?? [201, 209, 217]) : c.bg;
-        if (bg) {
-          canvas.drawRect(
-            Skia.XYWHRect(x * CELL_W, y * CELL_H, CELL_W, CELL_H),
-            paintFor(`rgb(${bg[0]},${bg[1]},${bg[2]})`),
-          );
-        }
-      }
-      let run = "";
-      let runStart = 0;
-      let runColor = "";
-      let runBold = false;
-      const flush = () => {
-        if (run !== "") {
-          canvas.drawText(
-            run,
-            runStart * CELL_W,
-            baseY,
-            paintFor(runColor),
-            runBold ? boldFont : font,
-          );
-        }
-        run = "";
-      };
-      for (let x = 0; x < line.length; x++) {
-        const c = line[x];
-        if (c.fl & FLAG_WIDE_SPACER) {
-          run += " "; // keep columns aligned; the wide glyph overdraws
-          continue;
-        }
-        const inverse = c.fl & FLAG_INVERSE;
-        const fgTriple = inverse ? (c.bg ?? [13, 17, 23]) : c.fg;
-        let color = fgTriple ? `rgb(${fgTriple[0]},${fgTriple[1]},${fgTriple[2]})` : FG;
-        if (c.fl & FLAG_FAINT) color = color === FG ? "#8b949e" : color;
-        const bold = (c.fl & FLAG_BOLD) !== 0;
-        const t = c.t === "" ? " " : c.t;
-        // Box-art blocks render as rects, not glyphs (no font seams).
-        if (
-          drawBlockChar(
-            canvas,
-            t,
-            x * CELL_W,
-            y * CELL_H,
-            CELL_W,
-            CELL_H,
-            paintFor(color),
-            (alpha) => {
-              const key = `${color}@${alpha}`;
-              let p = paints.current.get(key);
-              if (!p) {
-                p = Skia.Paint();
-                p.setColor(Skia.Color(color));
-                p.setAlphaf(alpha);
-                paints.current.set(key, p);
-              }
-              return p;
-            },
-          )
-        ) {
-          flush();
-          continue;
-        }
-        const fallback = fontForGlyph(t);
-        if (fallback) {
-          flush();
-          canvas.drawText(t, x * CELL_W, baseY, paintFor(color), fallback);
-          continue;
-        }
-        if ((color !== runColor || bold !== runBold) && run !== "") flush();
-        if (run === "") {
-          runStart = x;
-          runColor = color;
-          runBold = bold;
-        }
-        run += t;
-      }
-      flush();
+      const pic = rowPics.current[y];
+      if (!pic) continue;
+      canvas.save();
+      canvas.translate(0, y * CELL_H);
+      canvas.drawPicture(pic);
+      canvas.restore();
     }
     if (cursor.current.visible) {
-      const p = paintFor("rgba(201,209,217,0.55)");
       canvas.drawRect(
         Skia.XYWHRect(cursor.current.x * CELL_W, cursor.current.y * CELL_H, CELL_W, CELL_H),
-        p,
+        paintFor("rgba(201,209,217,0.55)"),
       );
     }
     setPicture(rec.finishRecordingAsPicture());
   }, []);
+
+  // Coalesce: frames can arrive faster than the display refreshes; compose
+  // at most once per animation frame.
+  const scheduleCompose = useCallback(() => {
+    if (composeScheduled.current) return;
+    composeScheduled.current = true;
+    requestAnimationFrame(() => {
+      composeScheduled.current = false;
+      try {
+        compose();
+      } catch (e: any) {
+        setStatus(`render error: ${String(e?.message ?? e)}`);
+      }
+    });
+  }, [compose]);
 
   const applyFrame = useCallback(
     (frame: Frame) => {
@@ -309,18 +342,29 @@ export function Terminal({ cfg, session, onBack }: Props) {
         setEchoMs(Math.round(Date.now() - inputSentAt.current));
         inputSentAt.current = null;
       }
-      if (frame.kind === "snapshot") {
-        grid.current = [];
-        for (let y = 0; y < frame.rows; y++) grid.current.push([]);
-      }
-      for (const row of frame.lines) {
-        if (row.y < grid.current.length) grid.current[row.y] = row.cells;
+      try {
+        if (frame.kind === "snapshot") {
+          grid.current = [];
+          rowPics.current = [];
+          for (let y = 0; y < frame.rows; y++) {
+            grid.current.push([]);
+            rowPics.current.push(null);
+          }
+        }
+        for (const row of frame.lines) {
+          if (row.y < grid.current.length) {
+            grid.current[row.y] = row.cells;
+            rowPics.current[row.y] = recordRow(row.cells);
+          }
+        }
+      } catch (e: any) {
+        setStatus(`render error: ${String(e?.message ?? e)}`);
       }
       cursor.current = frame.cursor;
       if (frame.mouse !== undefined) mouseMode.current = frame.mouse;
-      repaint();
+      scheduleCompose();
     },
-    [repaint],
+    [scheduleCompose],
   );
 
   // Swipe → scroll. With mouse tracking on (claude, vim, htop) swipes
@@ -391,11 +435,13 @@ export function Terminal({ cfg, session, onBack }: Props) {
     };
   }, [cfg, session, applyFrame]);
 
-  // Fit the PTY to the canvas whenever layout changes.
+  // Fit the PTY to the canvas whenever layout changes. The 2px margin
+  // absorbs fractional cell-width rounding so the last column can never
+  // fall off the screen edge.
   useEffect(() => {
     if (size.w === 0 || !handle.current) return;
     const { cellW, cellH } = getFontInfo();
-    const cols = Math.max(20, Math.floor(size.w / cellW));
+    const cols = Math.max(20, Math.floor((size.w - 2) / cellW));
     const rows = Math.max(5, Math.floor(size.h / cellH));
     handle.current.send({ type: "resize", rows, cols });
   }, [size, status]);
@@ -434,7 +480,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
           <Text style={styles.keyText}>‹ back</Text>
         </Pressable>
         <Text style={styles.overlay}>
-          {session} · {cols}×{rows}
+          {session} · {cols}×{rows} · {getFontInfo().family}
           {echoMs !== null ? ` · echo ${echoMs}ms` : ""}
           {status ? ` · ${status}` : ""}
         </Text>
@@ -473,10 +519,18 @@ export function Terminal({ cfg, session, onBack }: Props) {
       <TextInput
         ref={inputRef}
         style={styles.hiddenInput}
-        value=""
-        onChangeText={sendText}
-        onKeyPress={(e) => {
-          if (e.nativeEvent.key === "Backspace") sendText("\x7f");
+        // Sentinel pattern: the field always holds one zero-width space, so
+        // backspace produces onChangeText("") and typed text arrives as
+        // sentinel+chars. Avoids onKeyPress, which iOS fires unreliably
+        // (duplicate/spurious Backspace events).
+        value={"​"}
+        onChangeText={(t) => {
+          if (t === "") {
+            sendText("\x7f");
+            return;
+          }
+          const typed = t.startsWith("​") ? t.slice(1) : t;
+          if (typed !== "") sendText(typed);
         }}
         onSubmitEditing={() => sendText("\r")}
         submitBehavior="submit"
