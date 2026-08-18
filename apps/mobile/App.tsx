@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
-import { SafeAreaView, StyleSheet } from "react-native";
+import { SafeAreaView, ScrollView, StyleSheet, Text } from "react-native";
 import { ConnectionConfig } from "./src/client";
 import { Terminal } from "./src/components/Terminal";
 import { SessionInfo } from "./src/proto";
@@ -10,6 +10,34 @@ import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { SpawnScreen } from "./src/screens/SpawnScreen";
 
 const CONFIG_KEY = "landline.connection";
+
+/** Release builds have no dev overlay; render crashes as text rather than
+ * dying to a black screen. */
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: Error | null }
+> {
+  state = { error: null as Error | null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  render() {
+    if (this.state.error) {
+      const e = this.state.error;
+      return (
+        <ScrollView style={styles.crash}>
+          <Text style={styles.crashTitle}>landline crashed</Text>
+          <Text style={styles.crashText}>
+            {String(e.message ?? e)}
+            {"\n\n"}
+            {e.stack ?? ""}
+          </Text>
+        </ScrollView>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 type Screen =
   | { name: "connect" }
@@ -72,11 +100,14 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="light" />
-      {body()}
+      <ErrorBoundary>{body()}</ErrorBoundary>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#0d1117" },
+  crash: { flex: 1, backgroundColor: "#0d1117", padding: 16 },
+  crashTitle: { color: "#f85149", fontSize: 18, fontWeight: "600", marginBottom: 8 },
+  crashText: { color: "#c9d1d9", fontFamily: "monospace", fontSize: 12 },
 });

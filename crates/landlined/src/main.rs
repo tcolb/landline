@@ -60,7 +60,8 @@ enum Command {
         /// Shorthand: per-session container with this image.
         #[arg(long)]
         image: Option<String>,
-        #[arg(trailing_var_arg = true)]
+        /// Inline command; must follow `--` so it never swallows TEMPLATE.
+        #[arg(last = true)]
         cmd: Vec<String>,
     },
     /// List sessions.

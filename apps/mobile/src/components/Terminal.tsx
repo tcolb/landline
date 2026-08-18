@@ -10,6 +10,7 @@ import {
   Canvas,
   matchFont,
   Picture,
+  SkFont,
   SkPicture,
   Skia,
 } from "@shopify/react-native-skia";
@@ -38,12 +39,30 @@ const BG = "#0d1117";
 const FG = "#c9d1d9";
 const FONT_SIZE = 12;
 
-const fontFamily = Platform.select({ ios: "Menlo", default: "monospace" });
-const font = matchFont({ fontFamily, fontSize: FONT_SIZE });
-const metrics = font.getMetrics();
-const CELL_W = font.getTextWidth("0");
-const CELL_H = Math.ceil(-metrics.ascent + metrics.descent);
-const BASELINE = Math.ceil(-metrics.ascent);
+// Font creation touches Skia's native module, so it must not run at module
+// load (a throw there black-screens the whole app before any UI mounts).
+// Lazily initialized on first Terminal mount instead.
+interface FontInfo {
+  font: SkFont;
+  cellW: number;
+  cellH: number;
+  baseline: number;
+}
+let fontInfo: FontInfo | null = null;
+function getFontInfo(): FontInfo {
+  if (!fontInfo) {
+    const fontFamily = Platform.select({ ios: "Menlo", default: "monospace" });
+    const font = matchFont({ fontFamily, fontSize: FONT_SIZE });
+    const metrics = font.getMetrics();
+    fontInfo = {
+      font,
+      cellW: font.getTextWidth("0"),
+      cellH: Math.ceil(-metrics.ascent + metrics.descent),
+      baseline: Math.ceil(-metrics.ascent),
+    };
+  }
+  return fontInfo;
+}
 
 interface Props {
   cfg: ConnectionConfig;
@@ -78,6 +97,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
   };
 
   const repaint = useCallback(() => {
+    const { font, cellW: CELL_W, cellH: CELL_H, baseline: BASELINE } = getFontInfo();
     const rows = grid.current.length;
     if (rows === 0) return;
     const cols = grid.current[0]?.length ?? 0;
@@ -196,8 +216,9 @@ export function Terminal({ cfg, session, onBack }: Props) {
   // Fit the PTY to the canvas whenever layout changes.
   useEffect(() => {
     if (size.w === 0 || !handle.current) return;
-    const cols = Math.max(20, Math.floor(size.w / CELL_W));
-    const rows = Math.max(5, Math.floor(size.h / CELL_H));
+    const { cellW, cellH } = getFontInfo();
+    const cols = Math.max(20, Math.floor(size.w / cellW));
+    const rows = Math.max(5, Math.floor(size.h / cellH));
     handle.current.send({ type: "resize", rows, cols });
   }, [size, status]);
 
