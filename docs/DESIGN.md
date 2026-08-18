@@ -110,6 +110,11 @@ battery cost stay low, and scrollback is served on demand.
   handle → teardown. Isolation is per *session*, not per daemon.
 - **Harness profile**: preset launch command + state-detection patterns
   (working/blocked/done/idle) per agent CLI. Data, not code — user-extensible.
+- **SpawnSpec & templates**: every spawn — CLI flag, phone tap, or
+  agent-initiated — resolves to one declarative `SpawnSpec` (workspace +
+  environment + harness + setup + env). A **template** is a named,
+  parameterized SpawnSpec stored as data; clients reference templates and
+  supply params, they never construct configs. See "Templates".
 - **Mixed fleets are the normal case, not a mode**: the daemon holds N
   concurrent sessions across different harnesses *and* different environments
   at once (e.g. Claude Code on host + Codex in a container + OpenCode in
@@ -123,21 +128,73 @@ battery cost stay low, and scrollback is served on demand.
   binary data plane (snapshots, dirty-line diffs, input keys). One protocol
   for unix socket, LAN, and relay paths.
 
+## Templates
+
+Reliable, repeatable session startup ("start work on this repo, configured
+like this") without hardcoding, built on one rule: **a template is a named,
+parameterized SpawnSpec** — the same schema the CLI's inline flags map onto.
+Templates compose the other registries (environment specs, harness profiles)
+by reference; all three are data, user-extensible, never code.
+
+```toml
+# .landline/templates/webapp-fix.toml  (repo-local)
+# or ~/.config/landline/templates/     (user-global)
+schema = 1
+name = "webapp-fix"
+description = "Agent on the webapp repo in an isolated container"
+
+[params]                      # phone/CLI auto-generate the spawn form from this
+branch = { default = "main" }
+prompt = { required = true }
+
+[workspace]
+repo = "git@github.com:me/webapp.git"
+ref = "{{branch}}"
+strategy = "worktree"         # clone | worktree | dir
+
+[environment]
+use = "docker-node"           # named environment spec; inline overrides allowed
+
+[harness]
+use = "claude-code"           # named harness profile
+args = ["--permission-mode", "acceptEdits"]
+initial_prompt = "{{prompt}}"
+
+[setup]                       # runs in the environment before the harness
+run = ["mise install", "pnpm install"]
+
+[env]
+GITHUB_TOKEN = { secret = "gh-token" }   # by reference; values never in files
+```
+
+Rules:
+
+- `landline spawn webapp-fix -p branch=fix/auth -p prompt="fix login"`; the
+  mobile spawn flow is: pick template → fill params form → go.
+- Interpolation is `{{param}}` substitution only — no conditionals, no DSL.
+  Anything smarter belongs in a `[setup]` script.
+- Lookup order: repo-local `.landline/templates/` shadows user-global.
+- Sessions record the hash of their fully-resolved SpawnSpec, so any running
+  or dead session can answer "exactly what config was this?" and be respawned.
+- Later, not core: consuming `devcontainer.json` as an environment source for
+  docker environments.
+
 ## Milestones
 
 - **M1 — runtime core**: `Environment` trait with `host` impl, spawn a
   session, headless VT screen, `landline attach` in a terminal over the unix
   socket rendering from snapshot+diffs. *Proves the core bet end-to-end
   locally.*
-- **M2 — docker environments**: second `Environment` impl — per-session
-  container (image, workspace mount, limits), PTY via exec. *Proves the
-  environment abstraction with two real impls before host assumptions bake
-  in.*
+- **M2 — docker environments + registries**: second `Environment` impl —
+  per-session container (image, workspace mount, limits), PTY via exec — and
+  the data registries: SpawnSpec, environment specs, harness profiles,
+  templates with params. *Proves the environment abstraction with two real
+  impls before host assumptions bake in.*
 - **M3 — network protocol**: axum WebSocket server; throwaway xterm.js debug
   page to validate remote attach and the diff protocol.
 - **M4 — mobile v0**: Expo app, direct connect (LAN/Tailscale): session list,
-  spawn/kill (incl. environment picker), Skia terminal render, keyboard
-  input.
+  spawn/kill (template picker + params form), Skia terminal render,
+  keyboard input.
 - **M5 — relay + pairing**: hosted relay, QR pairing, E2E encryption, push
   notifications on blocked/done.
 - **M6 — orchestration**: agent-facing CLI (`spawn`/`send`/`wait`), message
@@ -162,7 +219,8 @@ docs/
   detach/reattach with instant snapshot, daemon restart recovers session list.
 - M2: `landline spawn --env docker --image ubuntu -- htop` renders identically
   to a host session; killing the session removes the container; host and
-  docker sessions run side by side.
+  docker sessions run side by side; a repo-local template spawns a
+  correctly-configured session twice in a row from one command.
 - M3: open debug page against a session over LAN; compare against terminal.
 - M4: on-device: spawn from phone into a docker environment, drive a Claude
   Code session, kill it.
