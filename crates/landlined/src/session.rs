@@ -46,10 +46,15 @@ pub struct Session {
     pub ctl_tx: xchan::Sender<Ctl>,
     pub events: broadcast::Sender<Event>,
     pub killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
+    pub environment: Box<dyn Environment>,
 }
 
 impl Session {
-    pub fn spawn(env: &dyn Environment, info: SessionInfo, spec: &LaunchSpec) -> Result<Arc<Self>> {
+    pub fn spawn(
+        env: Box<dyn Environment>,
+        info: SessionInfo,
+        spec: &LaunchSpec,
+    ) -> Result<Arc<Self>> {
         let Launched {
             master,
             mut child,
@@ -70,6 +75,7 @@ impl Session {
             ctl_tx: ctl_tx.clone(),
             events: events.clone(),
             killer: Mutex::new(killer),
+            environment: env,
         });
 
         // Reader: PTY output -> VT thread. EOF means the child side closed.
@@ -125,6 +131,10 @@ impl Session {
     }
 
     pub fn kill(&self) {
+        // Tear down the environment first: for containers, removing the
+        // container also ends the `run` child; a plain SIGKILL on the child
+        // would leave the container running.
+        self.environment.cleanup();
         let _ = self.killer.lock().unwrap().kill();
     }
 
@@ -179,6 +189,7 @@ fn vt_loop(
                         let _ = session.events.send(Event::Frame(frame));
                     }
                     session.info.lock().unwrap().status = SessionStatus::Exited { code };
+                    session.environment.cleanup();
                     let _ = session.events.send(Event::Exited { code });
                     return;
                 }

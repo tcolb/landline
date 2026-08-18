@@ -1,9 +1,11 @@
 mod attach;
+mod config;
 mod daemon;
 mod environment;
 mod paths;
 mod screen;
 mod session;
+mod spawn;
 
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -11,7 +13,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use landline_proto::wire::{Request, Response, SessionStatus};
+use landline_proto::wire::{Request, Response, SessionStatus, SpawnRequest};
 
 #[derive(Parser)]
 #[command(name = "landline", about = "Agent session runtime")]
@@ -24,13 +26,27 @@ struct Cli {
 enum Command {
     /// Run the daemon in the foreground.
     Daemon,
-    /// Spawn a new session: landline spawn [--name NAME] -- CMD [ARGS...]
+    /// Spawn a session from a template and/or an inline command:
+    ///   landline spawn TEMPLATE [-p key=value]...
+    ///   landline spawn [--env NAME | --image IMG] -- CMD [ARGS...]
     Spawn {
+        /// Template name (looked up in .landline/templates/, then
+        /// ~/.config/landline/templates/).
+        template: Option<String>,
+        /// Template parameter, key=value. Repeatable.
+        #[arg(short = 'p', long = "param", value_name = "KEY=VALUE")]
+        params: Vec<String>,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         cwd: Option<String>,
-        #[arg(trailing_var_arg = true, required = true)]
+        /// Named environment spec, or "host".
+        #[arg(long)]
+        env: Option<String>,
+        /// Shorthand: per-session container with this image.
+        #[arg(long)]
+        image: Option<String>,
+        #[arg(trailing_var_arg = true)]
         cmd: Vec<String>,
     },
     /// List sessions.
@@ -53,22 +69,43 @@ fn main() -> Result<()> {
     let socket = paths::socket_path();
     match cli.command {
         Command::Daemon => tokio::runtime::Runtime::new()?.block_on(daemon::run(socket)),
-        Command::Spawn { name, cwd, cmd } => {
-            let mut stream = connect_or_start(&socket)?;
+        Command::Spawn {
+            template,
+            params,
+            name,
+            cwd,
+            env,
+            image,
+            cmd,
+        } => {
+            let mut parsed = std::collections::HashMap::new();
+            for pair in params {
+                let Some((k, v)) = pair.split_once('=') else {
+                    anyhow::bail!("--param wants KEY=VALUE, got '{pair}'");
+                };
+                parsed.insert(k.to_string(), v.to_string());
+            }
+            let cwd = cwd.or_else(|| {
+                std::env::current_dir()
+                    .ok()
+                    .map(|d| d.display().to_string())
+            });
             let (rows, cols) = client_term_size();
-            let resp = roundtrip(
-                &mut stream,
-                &Request::Spawn {
-                    name,
-                    cmd,
-                    cwd,
-                    rows,
-                    cols,
-                },
-            )?;
-            match resp {
+            let spawn = SpawnRequest {
+                template,
+                params: parsed,
+                name,
+                cmd: if cmd.is_empty() { None } else { Some(cmd) },
+                cwd,
+                env,
+                image,
+                rows,
+                cols,
+            };
+            let mut stream = connect_or_start(&socket)?;
+            match roundtrip(&mut stream, &Request::Spawn { spawn })? {
                 Response::Spawned { info } => {
-                    println!("{}\t{}", info.id, info.name);
+                    println!("{}\t{}\t{}", info.id, info.name, info.environment);
                     Ok(())
                 }
                 other => fail(other),
@@ -86,10 +123,11 @@ fn main() -> Result<()> {
                             }
                         };
                         println!(
-                            "{}\t{}\t{}\t{}x{}\t{}",
+                            "{}\t{}\t{}\t{}\t{}x{}\t{}",
                             s.id,
                             s.name,
                             status,
+                            s.environment,
                             s.cols,
                             s.rows,
                             s.cmd.join(" ")

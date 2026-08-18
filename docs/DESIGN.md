@@ -224,7 +224,9 @@ Rules:
   impls before host assumptions bake in.*
 - **M3 — network protocol + interop**: axum WebSocket server; `bytes`
   attach mode with VT-reconstruction snapshot; `docs/PROTOCOL.md` with
-  version/capability negotiation; throwaway xterm.js debug page validating
+  version/capability negotiation; final-screen retention for exited
+  sessions (today the VT thread ends with the child, so postmortem attach
+  shows nothing — the last screen should stay servable); throwaway xterm.js debug page validating
   both attach modes remotely (frames mode hand-rendered, bytes mode fed
   straight into the page's emulator).
 - **M4 — mobile v0**: Expo app, direct connect (LAN/Tailscale): session list,

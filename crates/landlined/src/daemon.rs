@@ -7,12 +7,13 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
 use crossbeam_channel as xchan;
-use landline_proto::wire::{Frame, Request, Response, SessionInfo, SessionStatus};
+use landline_proto::wire::{Frame, Request, Response, SessionInfo, SessionStatus, SpawnRequest};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
 
-use crate::environment::{HostEnvironment, LaunchSpec};
+use crate::environment::LaunchSpec;
 use crate::session::{Ctl, Event, Session};
+use crate::spawn::resolve;
 
 #[derive(Default)]
 pub struct Registry {
@@ -78,7 +79,7 @@ pub async fn run(socket: PathBuf) -> Result<()> {
         let (stream, _) = listener.accept().await?;
         let registry = registry.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_conn(stream, &registry).await {
+            if let Err(e) = handle_conn(stream, registry).await {
                 tracing::debug!("connection ended: {e}");
             }
         });
@@ -92,7 +93,7 @@ async fn send(w: &mut (impl AsyncWriteExt + Unpin), resp: &Response) -> Result<(
     Ok(())
 }
 
-async fn handle_conn(stream: UnixStream, registry: &Registry) -> Result<()> {
+async fn handle_conn(stream: UnixStream, registry: Arc<Registry>) -> Result<()> {
     let (r, mut w) = stream.into_split();
     let mut lines = BufReader::new(r).lines();
 
@@ -114,14 +115,11 @@ async fn handle_conn(stream: UnixStream, registry: &Registry) -> Result<()> {
             }
         };
         match req {
-            Request::Spawn {
-                name,
-                cmd,
-                cwd,
-                rows,
-                cols,
-            } => {
-                let resp = spawn(registry, name, cmd, cwd, rows, cols);
+            Request::Spawn { spawn } => {
+                // Resolution can do file IO and git operations; keep it off
+                // the async runtime.
+                let registry = registry.clone();
+                let resp = tokio::task::spawn_blocking(move || do_spawn(&registry, &spawn)).await?;
                 send(&mut w, &resp).await?;
             }
             Request::Ls => {
@@ -176,41 +174,42 @@ async fn handle_conn(stream: UnixStream, registry: &Registry) -> Result<()> {
     Ok(())
 }
 
-fn spawn(
-    registry: &Registry,
-    name: Option<String>,
-    cmd: Vec<String>,
-    cwd: Option<String>,
-    rows: u16,
-    cols: u16,
-) -> Response {
-    if cmd.is_empty() {
-        return Response::Error {
-            message: "empty command".into(),
-        };
-    }
+fn do_spawn(registry: &Registry, req: &SpawnRequest) -> Response {
     let id = registry.fresh_id();
-    let cwd = cwd
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")));
+    let resolved = match resolve(req, &id) {
+        Ok(r) => r,
+        Err(e) => {
+            return Response::Error {
+                message: format!("spawn failed: {e:#}"),
+            };
+        }
+    };
+    let environment = match crate::environment::from_spec(&resolved.environment, &id) {
+        Ok(env) => env,
+        Err(e) => {
+            return Response::Error {
+                message: format!("spawn failed: {e:#}"),
+            };
+        }
+    };
     let info = SessionInfo {
         id: id.clone(),
-        name: name.unwrap_or_else(|| id.clone()),
-        cmd: cmd.clone(),
-        cwd: cwd.display().to_string(),
-        rows,
-        cols,
+        name: resolved.name.clone().unwrap_or_else(|| id.clone()),
+        cmd: resolved.cmd.clone(),
+        cwd: resolved.cwd.display().to_string(),
+        environment: resolved.environment.label(),
+        rows: req.rows,
+        cols: req.cols,
         status: SessionStatus::Running,
     };
     let spec = LaunchSpec {
-        cmd,
-        cwd,
-        rows,
-        cols,
+        cmd: resolved.final_cmd,
+        cwd: resolved.cwd,
+        env: resolved.env,
+        rows: req.rows,
+        cols: req.cols,
     };
-    // M1: host environment only. M2 threads an environment choice through
-    // the SpawnSpec instead of hardcoding one here.
-    match Session::spawn(&HostEnvironment, info.clone(), &spec) {
+    match Session::spawn(environment, info.clone(), &spec) {
         Ok(session) => {
             registry.insert(session);
             Response::Spawned { info }

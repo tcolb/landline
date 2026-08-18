@@ -24,7 +24,7 @@ def lines(s, timeout=5):
 
 # 1. spawn a session that prints and stays alive
 s = conn()
-rpc(s, {"type":"spawn","name":"t1","cmd":["bash","-lc","echo HELLO_LANDLINE; printf '\\x1b[31mRED\\x1b[0m\\n'; sleep 30"],"cwd":None,"rows":24,"cols":80})
+rpc(s, {"type":"spawn","spawn":{"name":"t1","cmd":["bash","-lc","echo HELLO_LANDLINE; printf '\\x1b[31mRED\\x1b[0m\\n'; sleep 30"],"cwd":None,"rows":24,"cols":80, "template":None,"params":{},"env":None,"image":None}})
 resp = next(lines(s))
 assert resp["type"] == "spawned", resp
 sid = resp["info"]["id"]
@@ -55,7 +55,7 @@ print("snapshot ok: text + color verified;", len(frame["frame"]["lines"]), "rows
 # 4. input: send a command to the shell? (bash -lc is running sleep; skip)
 # instead spawn interactive shell and type into it
 s2 = conn()
-rpc(s2, {"type":"spawn","name":"t2","cmd":["bash","-i"],"cwd":None,"rows":24,"cols":80})
+rpc(s2, {"type":"spawn","spawn":{"name":"t2","cmd":["bash","-i"],"cwd":None,"rows":24,"cols":80, "template":None,"params":{},"env":None,"image":None}})
 r2 = next(lines(s2)); assert r2["type"]=="spawned", r2
 time.sleep(0.5)
 b = conn()

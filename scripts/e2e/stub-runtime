@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Stub container runtime for e2e tests.
+
+Implements the docker/podman CLI subset landlined composes: `run` executes
+the command locally (simulating the workspace mount by chdir'ing to the host
+side of `-v HOST:/workspace`), records the "container"; `rm -f` kills it.
+Verifies our plumbing end to end; kernel isolation is out of scope here.
+"""
+import json, os, signal, sys
+
+STATE = os.environ.get("LANDLINE_STUB_STATE", f"/tmp/landline-stub-{os.getuid()}")
+
+def main():
+    argv = sys.argv[1:]
+    if not argv:
+        sys.exit(2)
+    if argv[0] == "run":
+        run(argv[1:])
+    elif argv[0] == "rm":
+        rm(argv[1:])
+    else:
+        sys.exit(2)
+
+def run(args):
+    name, image, cmd, workdir = None, None, None, None
+    env, mounts = {}, {}
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a in ("--rm", "-it"):
+            i += 1
+        elif a == "--name":
+            name = args[i + 1]; i += 2
+        elif a == "-e":
+            k, _, v = args[i + 1].partition("="); env[k] = v; i += 2
+        elif a == "-v":
+            host, _, cont = args[i + 1].partition(":"); mounts[cont] = host; i += 2
+        elif a == "-w":
+            workdir = args[i + 1]; i += 2
+        elif a.startswith("--"):  # --network=x, --memory=x, --cpus=x, ...
+            i += 1
+        else:
+            image = a
+            cmd = args[i + 1:]
+            break
+    assert name and image and cmd, f"unparseable run args: {args}"
+    os.makedirs(STATE, exist_ok=True)
+    with open(f"{STATE}/{name}.json", "w") as f:
+        json.dump({"image": image, "pid": os.getpid(), "cmd": cmd}, f)
+    os.environ.update(env)
+    os.environ["STUB_CONTAINER"] = name
+    if workdir and workdir in mounts:
+        os.chdir(mounts[workdir])
+    os.execvp(cmd[0], cmd)
+
+def rm(args):
+    names = [a for a in args if a != "-f"]
+    for name in names:
+        path = f"{STATE}/{name}.json"
+        try:
+            with open(path) as f:
+                pid = json.load(f)["pid"]
+            os.kill(pid, signal.SIGKILL)
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            pass
+
+main()

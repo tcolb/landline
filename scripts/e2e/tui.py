@@ -16,7 +16,7 @@ def rowtext(row): return "".join((c["t"] or " ") for c in row["cells"] if not (c
 
 # vim: alternate screen TUI
 s = conn()
-rpc(s, {"type":"spawn","name":"vim","cmd":["vim","-u","NONE"],"cwd":None,"rows":24,"cols":80})
+rpc(s, {"type":"spawn","spawn":{"name":"vim","cmd":["vim","-u","NONE"],"cwd":None,"rows":24,"cols":80, "template":None,"params":{},"env":None,"image":None}})
 r = next(lines(s)); assert r["type"]=="spawned", r
 time.sleep(1.0)
 a = conn(); rpc(a, {"type":"attach","session":"vim"})
@@ -40,7 +40,7 @@ time.sleep(0.5)
 
 # throughput: 100k lines through the VT
 s2 = conn()
-rpc(s2, {"type":"spawn","name":"flood","cmd":["bash","-lc","seq 1 100000; echo FLOOD_DONE; sleep 15"],"cwd":None,"rows":24,"cols":80})
+rpc(s2, {"type":"spawn","spawn":{"name":"flood","cmd":["bash","-lc","seq 1 100000; echo FLOOD_DONE; sleep 15"],"cwd":None,"rows":24,"cols":80, "template":None,"params":{},"env":None,"image":None}})
 next(lines(s2))
 t0=time.time()
 b = conn(); rpc(b, {"type":"attach","session":"flood"})
@@ -55,7 +55,7 @@ print(f"flood ok: 100k lines digested, DONE visible after {time.time()-t0:.2f}s 
 
 # unicode/emoji + wide chars
 s3 = conn()
-rpc(s3, {"type":"spawn","name":"uni","cmd":["bash","-lc","echo '日本語 🚀 café'; sleep 15"],"cwd":None,"rows":24,"cols":80})
+rpc(s3, {"type":"spawn","spawn":{"name":"uni","cmd":["bash","-lc","echo '日本語 🚀 café'; sleep 15"],"cwd":None,"rows":24,"cols":80, "template":None,"params":{},"env":None,"image":None}})
 next(lines(s3))
 time.sleep(0.5)
 c = conn(); rpc(c, {"type":"attach","session":"uni"})
