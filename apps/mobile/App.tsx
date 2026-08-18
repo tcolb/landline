@@ -3,11 +3,23 @@ import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
 import { SafeAreaView, ScrollView, StyleSheet, Text } from "react-native";
 import { ConnectionConfig } from "./src/client";
-import { Terminal } from "./src/components/Terminal";
 import { SessionInfo } from "./src/proto";
 import { ConnectScreen } from "./src/screens/ConnectScreen";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { SpawnScreen } from "./src/screens/SpawnScreen";
+
+// The terminal pulls in the Skia native module; loading it lazily keeps a
+// broken native module from black-screening the whole app at bundle eval —
+// the failure surfaces in the ErrorBoundary when the terminal opens instead.
+function LazyTerminal(props: {
+  cfg: ConnectionConfig;
+  session: string;
+  onBack(): void;
+}) {
+  const { Terminal } = require("./src/components/Terminal") as
+    typeof import("./src/components/Terminal");
+  return <Terminal {...props} />;
+}
 
 const CONFIG_KEY = "landline.connection";
 
@@ -49,12 +61,37 @@ export default function App() {
   const [cfg, setCfg] = useState<ConnectionConfig | null>(null);
   const [initial, setInitial] = useState<ConnectionConfig>({ host: "", token: "" });
   const [screen, setScreen] = useState<Screen>({ name: "connect" });
+  const [fatal, setFatal] = useState<string | null>(null);
 
   useEffect(() => {
     AsyncStorage.getItem(CONFIG_KEY).then((raw) => {
       if (raw) setInitial(JSON.parse(raw));
     });
   }, []);
+
+  // Uncaught errors outside render (event handlers, timers, WS callbacks)
+  // bypass the ErrorBoundary; surface them as text too.
+  useEffect(() => {
+    const utils = (globalThis as any).ErrorUtils;
+    if (!utils?.setGlobalHandler) return;
+    const prev = utils.getGlobalHandler?.();
+    utils.setGlobalHandler((e: any, isFatal?: boolean) => {
+      setFatal(`${String(e?.message ?? e)}\n\n${e?.stack ?? ""}`);
+      prev?.(e, isFatal);
+    });
+    return () => prev && utils.setGlobalHandler(prev);
+  }, []);
+
+  if (fatal) {
+    return (
+      <SafeAreaView style={styles.root}>
+        <ScrollView style={styles.crash}>
+          <Text style={styles.crashTitle}>landline crashed</Text>
+          <Text style={styles.crashText}>{fatal}</Text>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   const connected = (c: ConnectionConfig) => {
     setCfg(c);
@@ -88,7 +125,7 @@ export default function App() {
         );
       case "terminal":
         return (
-          <Terminal
+          <LazyTerminal
             cfg={cfg}
             session={screen.session}
             onBack={() => setScreen({ name: "sessions" })}

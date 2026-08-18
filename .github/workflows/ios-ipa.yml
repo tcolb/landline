@@ -103,6 +103,51 @@ jobs:
           cp -R "$APP" Payload/
           zip -qry out/landline.ipa Payload
 
+      # Boot the app on a simulator before publishing: a build that
+      # black-screens must never reach the install channel. The screenshot
+      # and JS console land in artifacts for remote eyes.
+      - name: Simulator smoke test
+        run: |
+          xcodebuild \
+            -workspace ios/landline.xcworkspace \
+            -scheme landline \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath simbuild \
+            CODE_SIGNING_ALLOWED=NO \
+            build > simbuild.log 2>&1 || { tail -80 simbuild.log; exit 1; }
+          UDID=$(xcrun simctl list devices available --json | python3 -c "
+          import json, sys
+          devices = json.load(sys.stdin)['devices']
+          for runtime in sorted(devices, reverse=True):
+              for dev in devices[runtime]:
+                  if 'iPhone' in dev['name']:
+                      print(dev['udid']); raise SystemExit
+          ")
+          echo "simulator: $UDID"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" simbuild/Build/Products/Release-iphonesimulator/landline.app
+          xcrun simctl launch --console-pty "$UDID" com.tcolb.landline > sim-console.log 2>&1 &
+          sleep 15
+          xcrun simctl io "$UDID" screenshot sim-screen.png
+          echo "--- app console ---"
+          cat sim-console.log
+          if ! xcrun simctl spawn "$UDID" launchctl list | grep -q com.tcolb.landline; then
+            echo "APP PROCESS DIED WITHIN 15s"
+            exit 1
+          fi
+
+      - name: Upload simulator artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-smoke
+          path: |
+            apps/mobile/sim-screen.png
+            apps/mobile/sim-console.log
+          if-no-files-found: ignore
+
       - name: Generate SideStore source
         run: |
           python3 ../../scripts/make-sidestore-source.py \

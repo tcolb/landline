@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import React, { useState } from "react";
 import {
   ActivityIndicator,
@@ -40,6 +41,7 @@ export function ConnectScreen({ initial, onConnected }: Props) {
   return (
     <View style={styles.root}>
       <Text style={styles.title}>landline</Text>
+      <Text style={styles.version}>v{Constants.expoConfig?.version ?? "?"}</Text>
       <Text style={styles.label}>daemon host:port (landline daemon --ws …)</Text>
       <TextInput
         style={styles.input}
@@ -81,6 +83,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     textAlign: "center",
   },
+  version: { color: "#484f58", fontSize: 12, textAlign: "center", marginTop: -20, marginBottom: 20 },
   label: { color: "#8b949e", fontSize: 12, marginBottom: 4 },
   input: {
     backgroundColor: "#161b22",
