@@ -1,0 +1,88 @@
+# Build the unsigned iOS .ipa and publish it through the fixed-tag
+# `sidestore` release, whose asset URLs are the stable install channel
+# (users re-sign with their own Apple ID at install time — no dev account).
+name: ios-ipa
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["mobile-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: apps/mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/mobile/pnpm-lock.yaml
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate the native iOS project
+        run: pnpm exec expo prebuild --platform ios --no-install
+
+      - name: Install pods
+        run: pod install --project-directory=ios
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace ios/landline.xcworkspace \
+            -scheme landline \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build | tail -100
+
+      - name: Package .ipa
+        run: |
+          APP=build/Build/Products/Release-iphoneos/landline.app
+          test -d "$APP"
+          rm -rf Payload out && mkdir -p Payload out
+          cp -R "$APP" Payload/
+          zip -qry out/landline.ipa Payload
+
+      - name: Generate SideStore source
+        run: |
+          python3 ../../scripts/make-sidestore-source.py \
+            out/landline.ipa \
+            "https://github.com/${{ github.repository }}/releases/download/sidestore/landline.ipa" \
+            out/source.json
+          cat out/source.json
+
+      - name: Publish to the sidestore release channel
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view sidestore --repo "${{ github.repository }}" >/dev/null 2>&1 || \
+            gh release create sidestore \
+              --repo "${{ github.repository }}" \
+              --title "SideStore channel" \
+              --notes "Install in SideStore: sidestore://source?url=https://github.com/${{ github.repository }}/releases/download/sidestore/source.json — or add the source URL manually: https://github.com/${{ github.repository }}/releases/download/sidestore/source.json"
+          gh release upload sidestore out/landline.ipa out/source.json \
+            --repo "${{ github.repository }}" --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: landline-ipa
+          path: apps/mobile/out/landline.ipa
