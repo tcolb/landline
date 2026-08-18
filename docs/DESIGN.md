@@ -216,7 +216,8 @@ docs/
 
 - M1: `landline spawn -- claude` then `landline attach` in another terminal;
   run a full-screen TUI (claude, htop, vim) and confirm faithful rendering,
-  detach/reattach with instant snapshot, daemon restart recovers session list.
+  detach/reattach with instant snapshot. (Sessions live in the daemon;
+  surviving a daemon restart is a later persistence milestone.)
 - M2: `landline spawn --env docker --image ubuntu -- htop` renders identically
   to a host session; killing the session removes the container; host and
   docker sessions run side by side; a repo-local template spawns a

@@ -1,0 +1,3 @@
+#!/bin/sh
+# C compiler/linker for systems without cc (e.g. SteamOS): delegates to zig.
+exec zig cc "$@"

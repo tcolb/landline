@@ -1,0 +1,11 @@
+# Use zig as the C compiler and linker so the only toolchain bootstrap is
+# `mise install` — no system cc required (SteamOS, bare containers).
+[env]
+CC = { value = "scripts/zig-cc", relative = true }
+# Always build the ghostty VT engine optimized: its Debug mode enables
+# integrity checks that make scrollback writes pathologically slow (~ms/line),
+# and we never debug ghostty internals from this repo.
+LIBGHOSTTY_VT_SYS_OPTIMIZE = "ReleaseFast"
+
+[target.x86_64-unknown-linux-gnu]
+linker = "scripts/zig-cc"

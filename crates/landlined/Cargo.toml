@@ -1,0 +1,23 @@
+[package]
+name = "landlined"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "landline"
+path = "src/main.rs"
+
+[dependencies]
+landline-proto = { path = "../proto" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "signal", "time", "process"] }
+portable-pty = "0.9"
+libghostty-vt = "0.2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+crossbeam-channel = "0.5"
+libc = "0.2"

@@ -4,3 +4,7 @@ CLAUDE.md
 # mise local overrides
 mise.local.toml
 .mise.local.toml
+
+# build artifacts
+/target
+node_modules/
