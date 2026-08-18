@@ -18,6 +18,21 @@ lint = "cargo clippy --all-targets -- -D warnings"
 fmt = "cargo fmt"
 e2e = "bash scripts/e2e.sh"
 
+[tasks.mobile]
+description = "Start the Expo dev server (scan QR with Expo Go on the same LAN)"
+dir = "apps/mobile"
+run = "pnpm start"
+
+[tasks.mobile-install]
+description = "Install mobile app dependencies"
+dir = "apps/mobile"
+run = "pnpm install"
+
+[tasks.mobile-check]
+description = "Typecheck the mobile app"
+dir = "apps/mobile"
+run = "pnpm run check"
+
 [settings]
 # Fail loudly instead of silently falling back to a system tool.
 not_found_auto_install = false
