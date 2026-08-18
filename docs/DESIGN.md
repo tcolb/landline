@@ -63,6 +63,37 @@ line diffs**. This is what makes mobile TUI rendering cheap: the app is a dumb
 grid painter, reconnects are instant (snapshot, not replay), bandwidth and
 battery cost stay low, and scrollback is served on demand.
 
+## Interop: an open runtime, many frontends
+
+`landlined` is a substrate, not a walled garden: any frontend — a
+terminal-native multiplexer TUI, a desktop IDE with its own xterm-style
+emulator, a web dashboard, or our mobile app — can serve sessions from the
+same daemon, and `landline` can remote into sessions those frontends created.
+Three design rules make that hold:
+
+1. **The protocol is the product boundary.** It is documented in
+   `docs/PROTOCOL.md` (deliverable of M3), versioned, with capability
+   negotiation at connect (client states protocol version + wanted
+   features). `landline-proto` is published as a crate, and the protocol is
+   plain JSON (binary frames negotiated as an optimization) so non-Rust
+   clients need no code from us.
+2. **Two attach altitudes.** `Attach { mode }` chooses:
+   - `frames` — server-rendered snapshot + dirty-row diffs, for thin
+     clients that just paint cells (our mobile app, web dashboards).
+   - `bytes` — raw PTY passthrough for clients that bring their own
+     emulator. On attach, the daemon synthesizes the current screen as a VT
+     escape-sequence stream from its server-side state (libghostty's `fmt`
+     supports rendering state back to VT sequences), so byte clients get an
+     instant live picture mid-session — tmux-attach semantics — then the
+     raw feed. Input and resize are identical in both modes.
+3. **Control plane stands alone.** Spawn/ls/kill/templates/events (state
+   changes, exits, blocked signals) are usable without attaching at all, so
+   orchestrators and dashboards can manage fleets without terminal streams.
+
+Later bridges, not core: an ACP session type (chat-altitude clients), AHP
+alignment for multi-client turn semantics, and possibly the tmux
+control-mode dialect so terminals that already speak it can attach natively.
+
 ## Architecture
 
 ```
@@ -125,8 +156,9 @@ battery cost stay low, and scrollback is served on demand.
   prompt (with optional prefix framing); also carries structured events
   (session spawned/exited/blocked) that other sessions or clients subscribe to.
 - **Wire protocol**: JSON control plane (spawn/kill/list/subscribe/resize),
-  binary data plane (snapshots, dirty-line diffs, input keys). One protocol
-  for unix socket, LAN, and relay paths.
+  data plane with two attach modes — rendered `frames` for thin clients,
+  raw `bytes` for clients with their own emulator (see "Interop"). One
+  protocol for unix socket, LAN, and relay paths.
 
 ## Templates
 
@@ -190,8 +222,11 @@ Rules:
   the data registries: SpawnSpec, environment specs, harness profiles,
   templates with params. *Proves the environment abstraction with two real
   impls before host assumptions bake in.*
-- **M3 — network protocol**: axum WebSocket server; throwaway xterm.js debug
-  page to validate remote attach and the diff protocol.
+- **M3 — network protocol + interop**: axum WebSocket server; `bytes`
+  attach mode with VT-reconstruction snapshot; `docs/PROTOCOL.md` with
+  version/capability negotiation; throwaway xterm.js debug page validating
+  both attach modes remotely (frames mode hand-rendered, bytes mode fed
+  straight into the page's emulator).
 - **M4 — mobile v0**: Expo app, direct connect (LAN/Tailscale): session list,
   spawn/kill (template picker + params form), Skia terminal render,
   keyboard input.
@@ -222,7 +257,9 @@ docs/
   to a host session; killing the session removes the container; host and
   docker sessions run side by side; a repo-local template spawns a
   correctly-configured session twice in a row from one command.
-- M3: open debug page against a session over LAN; compare against terminal.
+- M3: open debug page against a session over LAN in both attach modes;
+  byte-mode attach mid-session shows the live screen instantly; a
+  third-party terminal fed the byte stream renders identically.
 - M4: on-device: spawn from phone into a docker environment, drive a Claude
   Code session, kill it.
 - M6: one session spawns a second and receives its "done" event.
