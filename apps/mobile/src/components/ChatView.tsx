@@ -19,6 +19,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Platform,
   Pressable,
   StyleSheet,
@@ -128,6 +129,10 @@ function NativeComposer({
           <S.Spacer />
         </S.HStack>
       </S.Host>
+      {/* Clipping wrapper: the field renders a new wrapped line one commit
+          before the measured height lands, and Fabric's field does not clip
+          its own overflow. */}
+      <View style={[styles.inputClip, { height: inputH }]}>
       <TextInput
         ref={input}
         style={[styles.nativeInput, { height: inputH }]}
@@ -148,6 +153,7 @@ function NativeComposer({
         autoCapitalize="none"
         autoCorrect
       />
+      </View>
       {/* Invisible measurer: same font, line height, and wrap width as the
           input (UITextView adds 5pt line-fragment padding per side, mirrored
           here) — its layout height is the input's content height. */}
@@ -286,13 +292,21 @@ export function ChatView({ cfg, session }: Props) {
   // composer.
   useEffect(() => {
     if (Platform.OS !== "ios" || !nativeComposer) return;
+    // Animate the clearance with the keyboard curve: an instant padding
+    // jump moves the messages behind the translucent glass mid-transition,
+    // which reads as the bubble deforming.
+    const kbCurve = (duration: number) =>
+      LayoutAnimation.configureNext({
+        duration: Math.max(120, duration),
+        update: { type: "keyboard" },
+      });
     const show = Keyboard.addListener("keyboardWillShow", (e) => {
-      console.log(`[cmp] kbWillShow h=${e.endCoordinates.height}`);
+      kbCurve(e.duration ?? 250);
       setKbClearance(e.endCoordinates.height);
       requestAnimationFrame(() => list.current?.scrollToEnd({ animated: true }));
     });
-    const hide = Keyboard.addListener("keyboardWillHide", () => {
-      console.log("[cmp] kbWillHide");
+    const hide = Keyboard.addListener("keyboardWillHide", (e) => {
+      kbCurve(e.duration ?? 250);
       setKbClearance(0);
     });
     return () => {
@@ -448,11 +462,18 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingBottom: 10,
   },
-  nativeInput: {
+  inputClip: {
     position: "absolute",
     top: INPUT_PAD_TOP,
     left: 16,
     right: 16,
+    overflow: "hidden",
+  },
+  nativeInput: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
     color: "#e6edf3",
     backgroundColor: "transparent",
     fontSize: 18,
