@@ -56,22 +56,26 @@ const settleHaptic = (() => {
 
 function Scrim() {
   const k = kit!;
+  // Destructured so worklets capture runOnJS directly — invoking it as a
+  // property of a captured object is a host-function call inside the
+  // worklet and dies silently on device.
+  const { useAnimatedReaction, runOnJS } = k;
   const radius = useScreenRadius();
   const { width, height } = Dimensions.get("window");
   const progress = k.useDrawerProgress();
   // Fire once when the drawer settles at either end (dock/undock release),
   // not on mount and not mid-drag; dismiss the keyboard the moment the
   // card first moves off its docked position.
-  k.useAnimatedReaction(
+  useAnimatedReaction(
     () => progress.value ?? 0,
     (value, previous) => {
       "worklet";
       if (previous === null || previous === value) return;
       if (previous === 0 && value > 0) {
-        k.runOnJS(dismissAllKeyboards)();
+        runOnJS(dismissAllKeyboards)();
       }
       if ((value === 1 && previous < 1) || (value === 0 && previous > 0)) {
-        k.runOnJS(settleHaptic)();
+        runOnJS(settleHaptic)();
       }
     },
   );

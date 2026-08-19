@@ -16,7 +16,7 @@ import { useSelection } from "../selection";
 
 /** Bump on every UI change batch; shows in the dev bar so a stale bundle
  * is immediately visible on-device. */
-const JS_REV = "r25";
+const JS_REV = "r26";
 
 interface Props {
   cfg: ConnectionConfig;
@@ -31,11 +31,16 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
       <View style={styles.barCenter}>
         {selection?.chat ? (
           SwiftUI !== null && SwiftUIModifiers !== null ? (
-            <SwiftUI.Host style={{ width: 190, height: 32 }} colorScheme="dark">
+            <SwiftUI.Host style={{ width: 190, height: 44 }} colorScheme="dark">
               <SwiftUI.Picker
                 selection={view}
                 onSelectionChange={(v) => setView(v as "terminal" | "chat")}
-                modifiers={[SwiftUIModifiers.pickerStyle("segmented")]}
+                modifiers={[
+                  SwiftUIModifiers.pickerStyle("segmented"),
+                  // Stretch to the 44pt bar-button standard so the selector
+                  // and the glass circles read as one control row.
+                  SwiftUIModifiers.frame({ width: 190, height: 44 }),
+                ]}
               >
                 <SwiftUI.Text modifiers={[SwiftUIModifiers.tag("terminal")]}>
                   terminal
