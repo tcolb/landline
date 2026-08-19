@@ -12,7 +12,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionConfig } from "./src/client";
 import { drawerKit } from "./src/drawer-nav";
-import { getScreenCornerRadius } from "./modules/key-input";
+import { useScreenRadius } from "./src/screen-radius";
 import { IconButton } from "./src/components/IconButton";
 import { ConnectScreen } from "./src/screens/ConnectScreen";
 import { useSelection } from "./src/selection";
@@ -84,10 +84,7 @@ function DrawerMain({
   onDisconnect(): void;
 }) {
   const { selection, setSelection } = useSelection();
-  const [screenRadius, setScreenRadius] = useState(44);
-  useEffect(() => {
-    getScreenCornerRadius().then((r) => r > 0 && setScreenRadius(r));
-  }, []);
+  const screenRadius = useScreenRadius();
   const D = Drawer!;
   return (
     <D.Navigator

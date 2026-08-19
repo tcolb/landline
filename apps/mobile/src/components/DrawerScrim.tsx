@@ -4,6 +4,8 @@
 // corners). Opacity tracks drawer progress on the UI thread.
 
 import React from "react";
+import { StyleSheet } from "react-native";
+import { useScreenRadius } from "../screen-radius";
 
 const kit: {
   useDrawerProgress: () => { value: number };
@@ -28,27 +30,41 @@ const kit: {
 
 function Scrim() {
   const k = kit!;
+  const radius = useScreenRadius();
   const progress = k.useDrawerProgress();
-  const style = k.useAnimatedStyle(() => ({
+  const fillStyle = k.useAnimatedStyle(() => ({
     opacity: (progress.value ?? 0) * 0.08,
   }));
+  // Border ramps in fast: any displacement at all shows the card edge,
+  // fully invisible only at rest.
+  const borderStyle = k.useAnimatedStyle(() => ({
+    opacity: Math.min((progress.value ?? 0) * 6, 1),
+  }));
   const A = k.Animated.View;
+  const fill = {
+    position: "absolute" as const,
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 999,
+  };
   return (
-    <A
-      pointerEvents="none"
-      style={[
-        {
-          position: "absolute",
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: "#ffffff",
-          zIndex: 999,
-        },
-        style,
-      ]}
-    />
+    <>
+      <A pointerEvents="none" style={[fill, { backgroundColor: "#ffffff" }, fillStyle]} />
+      <A
+        pointerEvents="none"
+        style={[
+          fill,
+          {
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: "#3a3a3a",
+            borderRadius: radius,
+          },
+          borderStyle,
+        ]}
+      />
+    </>
   );
 }
 
