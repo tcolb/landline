@@ -53,7 +53,7 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onSettings }: 
   };
 
   return (
-    <SafeAreaView style={styles.root} edges={["top", "bottom", "left"]}>
+    <SafeAreaView style={styles.root} edges={["top", "left"]}>
       <DrawerRevealFx>
       <View style={styles.header}>
         <Text style={styles.title}>landline</Text>
@@ -83,8 +83,10 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onSettings }: 
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000000" },
-  fab: { position: "absolute", right: 14, bottom: 48 },
-  gear: { position: "absolute", left: 14, bottom: 52 },
+  // Bottom controls nestle into the screen bottom (no safe-area lift):
+  // the gear clears the display's rounded corner, the pill mirrors it.
+  fab: { position: "absolute", right: 14, bottom: 14 },
+  gear: { position: "absolute", left: 18, bottom: 18 },
   header: {
     flexDirection: "row",
     alignItems: "center",

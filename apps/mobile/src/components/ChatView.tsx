@@ -57,6 +57,12 @@ const nativeComposer = SwiftUI !== null && SwiftUIModifiers !== null && anim !==
 /** The whole composer as a single SwiftUI subtree: glass panel containing
  * the multiline field and the send circle. Sizes itself (matchContents);
  * grows with text. */
+/** Bubble geometry: one constant pair drives the corner seating. The send
+ * circle sits EDGE_GAP from both the trailing and bottom edges, keeping it
+ * concentric with the bubble's corner arc. */
+const BUBBLE_RADIUS = 26;
+const EDGE_GAP = 5;
+
 function NativeComposer({
   agentName,
   onSend,
@@ -80,11 +86,11 @@ function NativeComposer({
       <S.VStack
         spacing={2}
         modifiers={[
-          m.padding({ top: 6, bottom: 8, leading: 4, trailing: 8 }),
+          m.padding({ top: 6, bottom: EDGE_GAP, leading: 4, trailing: EDGE_GAP }),
           m.glassEffect({
             glass: { variant: "regular" },
             shape: "roundedRectangle",
-            cornerRadius: 26,
+            cornerRadius: BUBBLE_RADIUS,
           }),
         ]}
       >
@@ -98,7 +104,7 @@ function NativeComposer({
           modifiers={[
             m.font({ size: 18 }),
             m.lineLimit(5),
-            m.padding({ leading: 12, trailing: 8, top: 6 }),
+            m.padding({ leading: 12, trailing: 12, top: 8 }),
             m.textFieldStyle("plain"),
           ]}
         />
