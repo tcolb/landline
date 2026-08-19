@@ -57,11 +57,14 @@ const nativeComposer = SwiftUI !== null && SwiftUIModifiers !== null && anim !==
 /** The whole composer as a single SwiftUI subtree: glass panel containing
  * the multiline field and the send circle. Sizes itself (matchContents);
  * grows with text. */
-/** Bubble geometry: the send circle's seat in the corner, tunable per
- * axis. */
+/** Bubble geometry. The send circle is built at an exact diameter (glass
+ * applied to a fixed frame, not a system-padded button), so the concentric
+ * seat is exact by construction: with gap = R - D/2 on both axes the
+ * circle's center coincides with the corner arc's center, making the
+ * clearance identical along the edges and the diagonal. */
 const BUBBLE_RADIUS = 26;
-const SEND_GAP_TRAILING = 5;
-const SEND_GAP_BOTTOM = 8;
+const SEND_DIAMETER = 36;
+const SEND_GAP = BUBBLE_RADIUS - SEND_DIAMETER / 2;
 
 function NativeComposer({
   agentName,
@@ -88,9 +91,9 @@ function NativeComposer({
         modifiers={[
           m.padding({
             top: 6,
-            bottom: SEND_GAP_BOTTOM,
+            bottom: SEND_GAP,
             leading: 4,
-            trailing: SEND_GAP_TRAILING,
+            trailing: SEND_GAP,
           }),
           m.glassEffect({
             glass: { variant: "regular" },
@@ -115,21 +118,19 @@ function NativeComposer({
         />
         <S.HStack>
           <S.Spacer />
-          <S.Button
+          <S.Image
+            systemName="arrow.up"
+            size={16}
+            color="#ffffff"
             onPress={send}
             modifiers={[
-              m.buttonStyle("glassProminent"),
-              m.buttonBorderShape("circle"),
-              m.tint("#238636"),
+              m.frame({ width: SEND_DIAMETER, height: SEND_DIAMETER }),
+              m.glassEffect({
+                glass: { variant: "regular", interactive: true, tint: "#238636" },
+                shape: "circle",
+              }),
             ]}
-          >
-            <S.Image
-              systemName="arrow.up"
-              size={16}
-              color="#ffffff"
-              modifiers={[m.frame({ width: 22, height: 22 })]}
-            />
-          </S.Button>
+          />
         </S.HStack>
       </S.VStack>
     </S.Host>
