@@ -67,10 +67,12 @@ pub struct Session {
     /// Highest client input seq written to the PTY (0 = none yet); stamped
     /// onto frames as `ack` for client-side latency correlation.
     pub last_input_seq: AtomicU64,
-    /// When that input was written, µs since session spawn.
-    pub last_input_at_us: AtomicU64,
+    /// Write times of not-yet-acked inputs, (seq, µs since spawn). Every
+    /// acked seq gets an input→frame latency sample — timing only the
+    /// latest hides keystrokes an app echoes late in one batch.
+    pub pending_input_times: Mutex<std::collections::VecDeque<(u64, u64)>>,
     pub stats: Arc<SessionStats>,
-    /// Session spawn instant; epoch for `last_input_at_us`.
+    /// Session spawn instant; epoch for `pending_input_times`.
     pub started: Instant,
 }
 
@@ -106,7 +108,7 @@ impl Session {
             final_frame: Mutex::new(None),
             final_vt: Mutex::new(None),
             last_input_seq: AtomicU64::new(0),
-            last_input_at_us: AtomicU64::new(0),
+            pending_input_times: Mutex::new(std::collections::VecDeque::new()),
             stats: Arc::new(SessionStats::default()),
             started: Instant::now(),
         });
@@ -153,9 +155,14 @@ impl Session {
                         .input_latency
                         .record_duration(received.elapsed());
                     if let Some(seq) = seq {
-                        session
-                            .last_input_at_us
-                            .store(session.started.elapsed().as_micros() as u64, Relaxed);
+                        let now_us = session.started.elapsed().as_micros() as u64;
+                        {
+                            let mut times = session.pending_input_times.lock().unwrap();
+                            times.push_back((seq, now_us));
+                            if times.len() > 512 {
+                                times.pop_front();
+                            }
+                        }
                         session.last_input_seq.fetch_max(seq, Relaxed);
                     }
                 }
@@ -214,19 +221,21 @@ fn vt_loop(
     let mut last_emit = std::time::Instant::now() - FRAME_INTERVAL;
     // Stamp the highest PTY-written input seq onto outgoing frames so
     // clients can correlate input→effect on their own clock.
-    // Track which seq we've already timed so input→frame latency records
-    // once, on the first frame that acks each input.
-    let mut last_timed_seq: u64 = 0;
-    let mut stamp_ack = |frame: &mut Frame| {
+    let stamp_ack = |frame: &mut Frame| {
         let seq = session.last_input_seq.load(Relaxed);
         if seq > 0 {
             match frame {
                 Frame::Snapshot { ack, .. } | Frame::Diff { ack, .. } => *ack = Some(seq),
             }
-            if seq > last_timed_seq {
-                last_timed_seq = seq;
-                let written_us = session.last_input_at_us.load(Relaxed);
-                let now_us = session.started.elapsed().as_micros() as u64;
+            // Record input→frame latency for EVERY seq this frame acks;
+            // late batched echoes then show as the spread they are.
+            let now_us = session.started.elapsed().as_micros() as u64;
+            let mut times = session.pending_input_times.lock().unwrap();
+            while let Some(&(s, written_us)) = times.front() {
+                if s > seq {
+                    break;
+                }
+                times.pop_front();
                 session
                     .stats
                     .input_to_frame
