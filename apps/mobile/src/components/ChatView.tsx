@@ -67,6 +67,10 @@ const nativeComposer = SwiftUI !== null && SwiftUIModifiers !== null && anim !==
  * no cross-framework seam frames. SwiftUI is decoration only: the glass
  * fill and the fixed-size send circle, neither of which is ever measured.
  * Send seat is concentric by construction: gap = R - D/2. */
+/** A/B diagnostic: solid bubble to separate real geometry changes from
+ * background motion showing through the glass. */
+const DEBUG_OPAQUE_BUBBLE = true;
+
 const BUBBLE_RADIUS = 26;
 const SEND_DIAMETER = 36;
 const SEND_GAP = BUBBLE_RADIUS - SEND_DIAMETER / 2;
@@ -115,6 +119,9 @@ function NativeComposer({
   );
   return (
     <View style={{ height: bubbleH }}>
+      {DEBUG_OPAQUE_BUBBLE ? (
+        <View style={[StyleSheet.absoluteFill, styles.debugOpaque]} />
+      ) : (
       <S.Host style={StyleSheet.absoluteFill} colorScheme="dark" pointerEvents="none">
         <S.HStack
           modifiers={[
@@ -129,6 +136,7 @@ function NativeComposer({
           <S.Spacer />
         </S.HStack>
       </S.Host>
+      )}
       {/* Clipping wrapper: the field renders a new wrapped line one commit
           before the measured height lands, and Fabric's field does not clip
           its own overflow. */}
@@ -462,6 +470,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingBottom: 10,
   },
+  debugOpaque: { backgroundColor: "#1a1a1a", borderRadius: BUBBLE_RADIUS },
   inputClip: {
     position: "absolute",
     top: INPUT_PAD_TOP,
