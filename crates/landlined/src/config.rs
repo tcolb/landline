@@ -126,8 +126,7 @@ pub struct Workspace {
     /// "dir" (default) | "worktree". ("clone" is a later milestone.)
     #[serde(default)]
     pub strategy: Option<String>,
-    /// For the "clone" strategy (later milestone); accepted, not yet used.
-    #[allow(dead_code)]
+    /// For the "clone" strategy: git URL (interpolatable), mirror-cached.
     pub repo: Option<String>,
     #[serde(rename = "ref")]
     pub git_ref: Option<String>,

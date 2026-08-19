@@ -293,6 +293,27 @@ not a terminal multiplexer with agents bolted on. Practically:
   the same template identity: an agent spawning a helper names a template,
   not a shell command.
 
+### Repo-centric workspaces
+
+"Spin up claude for a repo" is the primary flow; a fixed directory in a
+template is only the local-dev special case. Staged:
+
+1. **Clone workspace strategy** (implemented): `workspace.strategy =
+   "clone"` with an interpolatable `repo` URL + `ref`. The daemon keeps a
+   mirror clone per repo under `~/.local/share/landline/repos/` (fetched
+   on reuse, non-fatally) and hands each session its own worktree. Git
+   auth is whatever the daemon host has — ssh keys, forge CLI credential
+   helpers; the daemon acts as the user.
+2. **Repo discovery + typed params**: a `repos` source for pickers —
+   registry files first, then forge CLI enumeration (`gh repo list`
+   style). Template params gain optional types (`repo`, `git-ref`,
+   `path`, `choice`) so clients render the right picker per param instead
+   of a bare text field; a `repo`-typed param feeds from discovery, a
+   `git-ref` param can enumerate branches of the chosen repo.
+3. **Forge connections** (relay/hosted era): OAuth/App-based GitHub and
+   GitLab connections for the hosted product, where "the daemon acts as
+   the user" no longer applies. Self-hosted keeps CLI credentials.
+
 ## Responsiveness budget
 
 "Feels instant" is a measured budget, not a vibe. Targets:

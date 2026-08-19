@@ -178,9 +178,82 @@ fn resolve_workspace(
             }
             Ok(target)
         }
-        Some("clone") => bail!("workspace strategy 'clone' is not implemented yet"),
+        Some("clone") => {
+            // Repo-centric workspace: mirror-clone once into a shared cache,
+            // fetch on reuse, then hand each session its own worktree. Git
+            // auth is whatever the daemon host already has (ssh keys, forge
+            // CLI credential helpers) — the daemon acts as the user.
+            let repo = ws
+                .repo
+                .as_deref()
+                .context("workspace strategy 'clone' needs `repo`")?;
+            let repo = interp(repo)?;
+            let git_ref = match ws.git_ref.as_deref() {
+                Some(r) => interp(r)?,
+                None => "HEAD".to_string(),
+            };
+            let cache = repos_dir().join(sanitize_repo(&repo));
+            if !cache.exists() {
+                std::fs::create_dir_all(repos_dir()).context("create repo cache dir")?;
+                let out = std::process::Command::new("git")
+                    .args(["clone", "--mirror"])
+                    .arg(&repo)
+                    .arg(&cache)
+                    .output()
+                    .context("run git clone --mirror")?;
+                if !out.status.success() {
+                    bail!(
+                        "git clone failed for {repo}: {}",
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
+                }
+            } else {
+                // Refresh the mirror; a stale cache is worse than a slow
+                // spawn. Failure is non-fatal (offline spawns still work).
+                let _ = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&cache)
+                    .args(["fetch", "--prune"])
+                    .output();
+            }
+            let target =
+                worktrees_dir().join(format!("{session_id}-{}", git_ref.replace('/', "-")));
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(&cache)
+                .args(["worktree", "add", "--force"])
+                .arg(&target)
+                .arg(&git_ref)
+                .output()
+                .context("run git worktree add")?;
+            if !out.status.success() {
+                bail!(
+                    "git worktree add failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
+            }
+            Ok(target)
+        }
         Some(other) => bail!("unknown workspace strategy '{other}'"),
     }
+}
+
+fn repos_dir() -> PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
+    PathBuf::from(home).join(".local/share/landline/repos")
+}
+
+/// Filesystem-safe cache key for a repo URL.
+fn sanitize_repo(url: &str) -> String {
+    url.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 fn worktrees_dir() -> PathBuf {

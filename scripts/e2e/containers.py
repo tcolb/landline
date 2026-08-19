@@ -164,6 +164,39 @@ t = snap_text("wtjob")
 assert t[0] == "MARKER=on-feat", t[:2]
 print("worktree strategy ok:", info["cwd"])
 subprocess.run(["git", "-C", repo, "worktree", "remove", "--force", info["cwd"]], check=True)
+
+# --- 6. clone workspace strategy: repo URL -> mirror cache -> worktree ---
+proj2 = tempfile.mkdtemp(prefix="landline-clone-proj-")
+os.makedirs(f"{proj2}/.landline/templates")
+with open(f"{proj2}/.landline/templates/repo-agent.toml", "w") as f:
+    f.write("""
+[params]
+repo = { required = true }
+ref = { default = "main" }
+
+[workspace]
+strategy = "clone"
+repo = "{{repo}}"
+ref = "{{ref}}"
+
+[harness]
+cmd = ["sh", "-c", "echo CLONED=$(cat marker.txt); sleep 20"]
+""")
+info = spawn(name="clonejob", template="repo-agent",
+             params={"repo": f"file://{repo}", "ref": "feat"}, cwd=proj2)
+assert "worktrees" in info["cwd"] and info["cwd"].endswith("-feat"), info["cwd"]
+time.sleep(0.7)
+t = snap_text("clonejob")
+assert t[0] == "CLONED=on-feat", t[:2]
+# spawn a second from the same repo: cache reuse, distinct worktree
+info2 = spawn(name="clonejob2", template="repo-agent",
+              params={"repo": f"file://{repo}", "ref": "main"}, cwd=proj2)
+assert info2["cwd"] != info["cwd"], (info["cwd"], info2["cwd"])
+time.sleep(0.7)
+t2 = snap_text("clonejob2")
+assert t2[0] == "CLONED=on-main", t2[:2]
+print("clone strategy ok:", info["cwd"])
+shutil.rmtree(proj2)
 shutil.rmtree(repo)
 
-print("ALL CONTAINER/TEMPLATE TESTS PASSED (incl. worktree)")
+print("ALL CONTAINER/TEMPLATE TESTS PASSED (incl. worktree, clone)")
