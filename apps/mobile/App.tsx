@@ -12,6 +12,7 @@ import { Dimensions, ScrollView, StyleSheet, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionConfig } from "./src/client";
 import { drawerKit } from "./src/drawer-nav";
+import { kbc } from "./src/kb-native";
 import { useScreenRadius } from "./src/screen-radius";
 import { ConnectScreen } from "./src/screens/ConnectScreen";
 import { useSelection } from "./src/selection";
@@ -197,9 +198,12 @@ export default function App() {
   if (!hydrated) return null;
 
   const Root = drawerKit?.GestureHandlerRootView ?? React.Fragment;
+  // Native keyboard animation projections for the chat composer (guarded).
+  const KBProvider = kbc?.KeyboardProvider ?? React.Fragment;
   const rootProps = drawerKit ? { style: { flex: 1 } } : {};
   return (
     <Root {...rootProps}>
+    <KBProvider>
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         <StatusBar style="light" />
@@ -279,6 +283,7 @@ export default function App() {
         </ErrorBoundary>
       </QueryClientProvider>
     </SafeAreaProvider>
+    </KBProvider>
     </Root>
   );
 }

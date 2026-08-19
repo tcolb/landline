@@ -27,6 +27,7 @@ import {
   View,
 } from "react-native";
 import { AttachHandle, attachChat, ConnectionConfig } from "../client";
+import { kbc } from "../kb-native";
 import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { ChatItem, inputMessage } from "../proto";
 import { useSessions } from "../sessions";
@@ -46,6 +47,7 @@ const anim = (() => {
       Animated: r.default,
       useAnimatedKeyboard: r.useAnimatedKeyboard,
       useAnimatedStyle: r.useAnimatedStyle,
+      useSharedValue: r.useSharedValue,
     };
   } catch {
     return null;
@@ -76,6 +78,9 @@ function NativeComposer({
   const S = SwiftUI!;
   const m = SwiftUIModifiers!;
   const draft = useRef("");
+  // Animation trigger: SwiftUI animates layout changes keyed on this value,
+  // masking the one-frame matchContents resize lag during growth.
+  const [textLen, setTextLen] = useState(0);
   const field = useRef<import("@expo/ui/swift-ui").TextFieldRef>(null);
   const send = () => {
     const text = draft.current.trim();
@@ -105,6 +110,9 @@ function NativeComposer({
           // upward (hosting views don't clip) instead of shoving the send
           // row below the clip — growth reads as instant.
           m.frame({ maxWidth: 9999, maxHeight: 9999, alignment: "bottom" }),
+          // Near-instant ease over line changes: masks the resize lag frame
+          // without reading as an animation.
+          m.animation(m.Animation.easeOut({ duration: 0.12 }), textLen),
         ]}
       >
         <S.TextField
@@ -113,6 +121,7 @@ function NativeComposer({
           placeholder={`Ask ${agentName}`}
           onTextChange={(t) => {
             draft.current = t;
+            setTextLen(t.length);
           }}
           modifiers={[
             m.font({ size: 18 }),
@@ -143,8 +152,35 @@ function NativeComposer({
 }
 
 /** Positions the composer above the keyboard by animating its bottom
- * offset on the UI thread (position, never transform — see header). */
-function KeyboardDocked({ children }: { children: React.ReactNode }) {
+ * offset on the UI thread (position, never transform — see header).
+ * Driver preference: keyboard-controller's native projections (exact
+ * system curve) when the binary has it; reanimated's tracker otherwise. */
+function DockedByController({ children }: { children: React.ReactNode }) {
+  const a = anim!;
+  const h = a.useSharedValue!(0);
+  kbc!.useKeyboardHandler(
+    {
+      onMove: (e) => {
+        "worklet";
+        h.value = e.height;
+      },
+      onInteractive: (e) => {
+        "worklet";
+        h.value = e.height;
+      },
+      onEnd: (e) => {
+        "worklet";
+        h.value = e.height;
+      },
+    },
+    [],
+  );
+  const style = a.useAnimatedStyle(() => ({ bottom: h.value }));
+  const A = a.Animated.View;
+  return <A style={[styles.dock, style]}>{children}</A>;
+}
+
+function DockedByReanimated({ children }: { children: React.ReactNode }) {
   const a = anim!;
   const kb = a.useAnimatedKeyboard();
   const style = a.useAnimatedStyle(() => ({
@@ -152,6 +188,13 @@ function KeyboardDocked({ children }: { children: React.ReactNode }) {
   }));
   const A = a.Animated.View;
   return <A style={[styles.dock, style]}>{children}</A>;
+}
+
+function KeyboardDocked({ children }: { children: React.ReactNode }) {
+  if (kbc !== null && anim?.useSharedValue) {
+    return <DockedByController>{children}</DockedByController>;
+  }
+  return <DockedByReanimated>{children}</DockedByReanimated>;
 }
 
 export function ChatView({ cfg, session }: Props) {
