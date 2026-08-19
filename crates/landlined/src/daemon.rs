@@ -569,8 +569,20 @@ async fn attached_chat(mut client: Client, session: &Arc<Session>) -> Result<()>
         client.send(&Response::Exited { code }).await?;
         return Ok(());
     }
+    // Busy heuristic: a TUI agent repaints continuously while working, so
+    // recent PTY output ≈ working. Sent on transitions only.
+    let mut status_tick = tokio::time::interval(std::time::Duration::from_millis(500));
+    let mut last_working: Option<bool> = None;
     loop {
         tokio::select! {
+            _ = status_tick.tick() => {
+                let working = session
+                    .output_active_within(std::time::Duration::from_millis(1500));
+                if last_working != Some(working) {
+                    last_working = Some(working);
+                    client.send(&Response::ChatStatus { working }).await?;
+                }
+            }
             ev = chat.recv() => match ev {
                 Ok(ChatEvent::Item(item)) => {
                     if item.id > last_id {

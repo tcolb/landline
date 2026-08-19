@@ -71,6 +71,7 @@ pub struct NewChatItem {
     pub call_id: Option<String>,
     pub ok: Option<bool>,
     pub truncated: Option<bool>,
+    pub parent_call_id: Option<String>,
 }
 
 pub struct Session {
@@ -100,9 +101,18 @@ pub struct Session {
     pub chat_events: broadcast::Sender<ChatEvent>,
     pub chat_enabled: bool,
     chat_next_id: AtomicU64,
+    /// µs-since-spawn of the last PTY output byte: the busy heuristic for
+    /// chat_status (a TUI agent repaints continuously while working).
+    pub last_output_us: AtomicU64,
 }
 
 impl Session {
+    /// PTY output within the last `window`: the busy heuristic.
+    pub fn output_active_within(&self, window: Duration) -> bool {
+        let last = self.last_output_us.load(Relaxed);
+        last != 0 && self.started.elapsed().as_micros() as u64 - last < window.as_micros() as u64
+    }
+
     /// Append a chat item and broadcast it (called by the chat tailer).
     pub fn push_chat_item(&self, new: NewChatItem) {
         let item = ChatItem {
@@ -117,6 +127,7 @@ impl Session {
             call_id: new.call_id,
             ok: new.ok,
             truncated: new.truncated,
+            parent_call_id: new.parent_call_id,
         };
         self.chat_items.lock().unwrap().push(item.clone());
         let _ = self.chat_events.send(ChatEvent::Item(item));
@@ -164,6 +175,7 @@ impl Session {
             chat_events,
             chat_enabled: chat_format.is_some(),
             chat_next_id: AtomicU64::new(0),
+            last_output_us: AtomicU64::new(0),
         });
 
         // Chat tailer: follow the harness's live session file (hybrid
@@ -177,6 +189,7 @@ impl Session {
         // Reader: PTY output -> VT thread, teed to bytes-mode subscribers.
         {
             let stats = session.stats.clone();
+            let s = session.clone();
             std::thread::spawn(move || {
                 let mut buf = [0u8; 16 * 1024];
                 loop {
@@ -184,6 +197,8 @@ impl Session {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
                             stats.pty_bytes_in.fetch_add(n as u64, Relaxed);
+                            s.last_output_us
+                                .store(s.started.elapsed().as_micros() as u64, Relaxed);
                             let chunk = buf[..n].to_vec();
                             let _ = bytes.send(chunk.clone()); // no subscribers is fine
                             if out_tx.send(chunk).is_err() {

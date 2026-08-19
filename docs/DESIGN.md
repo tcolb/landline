@@ -375,10 +375,33 @@ implemented and validated against real files.
    text capping with a truncated marker; "working" indicator — client
    derives running-ness from unresolved call_ids, and the daemon can
    supplement with a PTY-activity busy signal no transcript provides.
-3. Reserved: `chat_update` response type for streaming item mutation
-   (chat-native sessions); `parent_call_id` for nesting subagent
-   activity under its spawning action; event items for model change /
-   compaction; content parts (images).
+3. Shipped: `parent_call_id` subagent nesting (Claude sidechains bound
+   by Task prompt + uuid chain); compaction event items; `chat_status`
+   busy transitions from PTY output activity.
+4. Reserved: `chat_update` response type for streaming item mutation
+   (chat-native sessions); event items for model change; content parts
+   (images).
+
+### Slash command contract (planned)
+
+Harnesses expose slash commands ("/compact", "/model", custom project
+commands); the app should offer them natively instead of making the user
+type into a proxied TUI. Contract, staged:
+
+1. **Declaration**: the harness descriptor grows `[[command]]` entries —
+   `name`, `description`, optional `args` hint — for the harness's stable
+   built-ins. Project-defined commands (e.g. a repo's custom slash
+   commands) can later be discovered by a daemon-side probe and merged.
+2. **Wire**: a `commands { session }` request returns the declared list
+   (additive; feature `commands`). Clients cache per session.
+3. **Invocation**: in hybrid sessions a command is TYPED — the daemon
+   (or client) writes `/name args\n` to the PTY, because the TUI owns
+   command semantics. In future chat-native sessions the same contract
+   maps to the harness's structured RPC instead. One declaration, two
+   transports.
+4. **Client UX**: typing "/" in the chat composer opens a native command
+   menu (name + description, args prompt when hinted); commands are
+   first-class chat items when echoed back by the transcript.
 
 ### Repo-centric workspaces
 

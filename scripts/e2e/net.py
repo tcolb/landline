@@ -226,7 +226,13 @@ script = (
         {"type": "tool_use", "id": "t1", "name": "Edit",
          "input": {"file_path": "/tmp/x.rs", "old_string": "a", "new_string": "b"}}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 1; "
     "echo '" + json.dumps({"type": "user", "message": {"content": [
-        {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 30"
+        {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 1; "
+    "echo '" + json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "task1", "name": "Task",
+         "input": {"description": "scan", "subagent_type": "Explore", "prompt": "find it"}}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 1; "
+    "echo '" + json.dumps({"type": "user", "isSidechain": True, "uuid": "u1", "parentUuid": None,
+        "message": {"role": "user", "content": "find it"}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 1; "
+    "echo '" + json.dumps({"type": "summary", "summary": "compacted stuff", "leafUuid": "x"}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 30"
 )
 (ctpl / "chatty.toml").write_text(
     "[chat]\nformat = \"claude\"\n[harness]\ncmd = [\"sh\", \"-c\", " + json.dumps(script) + "]\n"
@@ -241,12 +247,15 @@ s6.close()
 a6 = conn()
 rpc(a6, {"type": "attach", "session": "chatty", "mode": "chat"})
 items = []
-for msg in lines(a6, timeout=15):
+statuses = []
+for msg in lines(a6, timeout=20):
     if msg["type"] == "chat_snapshot":
         items.extend(msg["items"])
     elif msg["type"] == "chat_item":
         items.append(msg["item"])
-    if len(items) >= 5:
+    elif msg["type"] == "chat_status":
+        statuses.append(msg["working"])
+    if len(items) >= 8:
         break
 kinds = [(i["role"], i["kind"]) for i in items]
 assert ("user", "text") in kinds and ("assistant", "text") in kinds, kinds
@@ -260,7 +269,13 @@ assert action["target"] == "/tmp/x.rs", action
 assert action["call_id"] == "t1", action
 result = next(i for i in items if i["kind"] == "action_result")
 assert result["call_id"] == "t1", result
-print("chat view ok:", kinds)
+assert result["ok"] is True, result
+side = next(i for i in items if i.get("parent_call_id"))
+assert side["parent_call_id"] == "task1", side
+event = next(i for i in items if i["kind"] == "event")
+assert event["category"] == "compaction", event
+assert len(statuses) >= 1, statuses
+print("chat view ok:", kinds, "statuses:", statuses[:3])
 a6.close()
 s = conn(); rpc(s, {"type": "kill", "session": "chatty"}); next(lines(s)); s.close()
 shutil.rmtree(chat_tdir, ignore_errors=True)

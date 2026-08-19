@@ -166,6 +166,8 @@ export async function attachChat(
   on: {
     snapshot(items: ChatItem[]): void;
     item(item: ChatItem): void;
+    /** PTY-activity busy transitions (fires before any transcript write). */
+    status?(working: boolean): void;
     exited(code: number | null): void;
     error(message: string): void;
     closed(): void;
@@ -176,6 +178,7 @@ export async function attachChat(
     const resp = JSON.parse(String(ev.data)) as Response;
     if (resp.type === "chat_snapshot") on.snapshot(resp.items);
     else if (resp.type === "chat_item") on.item(resp.item);
+    else if (resp.type === "chat_status") on.status?.(resp.working);
     else if (resp.type === "exited") on.exited(resp.code);
     else if (resp.type === "error") on.error(resp.message);
   };

@@ -83,6 +83,8 @@ export interface ChatItem {
   ok?: boolean;
   /** True when text was capped server-side. */
   truncated?: boolean;
+  /** Set on subagent items: call_id of the action that spawned it. */
+  parent_call_id?: string;
 }
 
 export interface SpawnRequest {
@@ -153,6 +155,7 @@ export type Response =
   | { type: "environments"; environments: EnvironmentInfo[] }
   | { type: "chat_snapshot"; items: ChatItem[] }
   | { type: "chat_item"; item: ChatItem }
+  | { type: "chat_status"; working: boolean }
   | { type: "exited"; code: number | null };
 
 // Base64 helpers, dependency-free (Hermes has atob/btoa, but UTF-8 needs

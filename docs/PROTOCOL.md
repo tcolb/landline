@@ -144,7 +144,21 @@ the harness id linking an `action_result` to its `action`; `text` keeps
 the raw input/output. Results also carry `ok` (false when the harness
 marked the call failed) and `truncated` (true when `text` was capped
 server-side; the terminal view holds full output). A client can derive a
-"working" state from any action whose `call_id` has no result yet. All of these fields are optional (feature
+"working" state from any action whose `call_id` has no result yet.
+
+Items produced by a subagent carry `parent_call_id` — the `call_id` of
+the spawning `subagent` action; clients nest them under that chip.
+Harness lifecycle facts (e.g. context compaction) arrive as
+`kind: "event"` items with a `category` and `title`.
+
+While attached in chat mode the server also emits busy transitions
+derived from PTY output activity (feature `chat-status`) — this fires
+before any transcript write, so "working" can show from the moment the
+agent starts streaming:
+
+```json
+← {"type": "chat_status", "working": true}
+``` All of these fields are optional (feature
 `chat-actions`, additive). Input/resize/detach behave exactly as in the
 other modes — chat input types into the same PTY the terminal views show.
 

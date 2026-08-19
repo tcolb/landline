@@ -23,6 +23,7 @@ pub const FEATURES: &[&str] = &[
     "stats",
     "input-seq",
     "chat-actions",
+    "chat-status",
 ];
 
 /// Base64 (standard alphabet, padded) serde adapter for binary payloads.
@@ -205,6 +206,12 @@ pub enum Response {
     ChatItem {
         item: ChatItem,
     },
+    /// Busy-state transition; only in `chat` attach mode. Derived from PTY
+    /// output activity — fires before any transcript write, so "working"
+    /// shows from the moment the agent starts streaming.
+    ChatStatus {
+        working: bool,
+    },
     /// Reply to `Stats`: counters and histograms, shape documented in
     /// docs/PROFILING.md. Schemaless on purpose — additive by nature.
     Stats {
@@ -290,6 +297,10 @@ pub struct ChatItem {
     /// True when `text` was capped server-side.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub truncated: Option<bool>,
+    /// Set on items produced by a subagent: the `call_id` of the action
+    /// that spawned it (nest under that chip).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

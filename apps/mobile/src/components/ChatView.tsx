@@ -278,6 +278,7 @@ export function ChatView({ cfg, session }: Props) {
   const [status, setStatus] = useState("connecting…");
   const [draft, setDraft] = useState("");
   const [kbClearance, setKbClearance] = useState(0);
+  const [ptyWorking, setPtyWorking] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   // Unresolved actions (no linked result yet) render a spinner; if the
   // newest item is one of them — or a user message awaiting any reply —
@@ -299,6 +300,9 @@ export function ChatView({ cfg, session }: Props) {
       (unresolved.has(last.id) || (last.kind === "text" && last.role === "user"));
     return { unresolved, working };
   }, [items]);
+  // Transcript-derived OR live PTY activity: the daemon's signal fires
+  // before the first transcript write.
+  const showWorking = working || ptyWorking;
   const handle = useRef<AttachHandle | null>(null);
   const list = useRef<LegendListRef>(null);
 
@@ -312,6 +316,7 @@ export function ChatView({ cfg, session }: Props) {
         setItems((prev) =>
           prev.some((p) => p.id === item.id) ? prev : [...prev, item],
         ),
+      status: (working) => alive && setPtyWorking(working),
       exited: (code) => alive && setStatus(`exited(${code ?? "?"})`),
       error: (m) => alive && setStatus(m),
       closed: () => alive && setStatus((s) => (s.startsWith("exited") ? s : "disconnected")),
@@ -366,6 +371,9 @@ export function ChatView({ cfg, session }: Props) {
   };
 
   const renderItem = ({ item }: { item: ChatItem }) => {
+    const nested = item.parent_call_id !== undefined;
+    const wrap = (node: React.ReactElement) =>
+      nested ? <View style={styles.nested}>{node}</View> : node;
     const expanded = expandedIds.has(item.id);
     const toggle = () =>
       setExpandedIds((prev) => {
@@ -374,18 +382,27 @@ export function ChatView({ cfg, session }: Props) {
         else next.add(item.id);
         return next;
       });
+    if (item.kind === "event") {
+      return wrap(
+        <Pressable style={styles.eventRow} onPress={toggle}>
+          <Text style={styles.eventText} numberOfLines={expanded ? undefined : 1}>
+            — {item.title ?? "event"}{expanded ? `: ${item.text}` : ""} —
+          </Text>
+        </Pressable>,
+      );
+    }
     if (item.kind === "thinking") {
-      return (
+      return wrap(
         <Pressable style={styles.thinkingRow} onPress={toggle}>
           <Text style={styles.thinkingText} numberOfLines={expanded ? undefined : 2}>
             {item.text}
           </Text>
-        </Pressable>
+        </Pressable>,
       );
     }
     if (item.kind === "action" || item.kind === "tool_use") {
       const running = unresolved.has(item.id);
-      return (
+      return wrap(
         <Pressable style={styles.actionRow} onPress={toggle}>
           <View style={styles.actionChip}>
             <ActionIcon category={item.category ?? "other"} />
@@ -399,12 +416,12 @@ export function ChatView({ cfg, session }: Props) {
               {item.text}
             </Text>
           )}
-        </Pressable>
+        </Pressable>,
       );
     }
     if (item.kind === "action_result" || item.kind === "tool_result") {
       const failed = item.ok === false;
-      return (
+      return wrap(
         <Pressable
           style={[styles.toolRow, failed && styles.toolRowFailed]}
           onPress={toggle}
@@ -416,22 +433,22 @@ export function ChatView({ cfg, session }: Props) {
             {item.text}
             {item.truncated ? " …(truncated — see terminal)" : ""}
           </Text>
-        </Pressable>
+        </Pressable>,
       );
     }
     // Genre convention: only the user's messages sit in a bubble; the
     // agent's prose flows as full-width text blocks.
-    if (item.role === "user") {
+    if (item.role === "user" && !nested) {
       return (
         <View style={[styles.bubble, styles.userBubble]}>
           <Text style={styles.userText}>{item.text}</Text>
         </View>
       );
     }
-    return (
+    return wrap(
       <View style={styles.assistantBlock}>
-        <Text style={styles.assistantText}>{item.text}</Text>
-      </View>
+        <Text style={nested ? styles.nestedText : styles.assistantText}>{item.text}</Text>
+      </View>,
     );
   };
 
@@ -445,7 +462,7 @@ export function ChatView({ cfg, session }: Props) {
       recycleItems
       contentContainerStyle={{ paddingBottom: kbClearance + 120 }}
       ListFooterComponent={
-        working ? (
+        showWorking ? (
           <View style={styles.workingRow}>
             <ActivityIndicator size="small" color="#6e7681" />
             <Text style={styles.workingText}>working…</Text>
@@ -524,6 +541,15 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   assistantText: { color: "#c9d1d9", fontSize: 18, lineHeight: 27 },
+  nested: {
+    marginLeft: 22,
+    borderLeftWidth: 2,
+    borderLeftColor: "#21262d",
+    paddingLeft: 6,
+  },
+  nestedText: { color: "#8b949e", fontSize: 15, lineHeight: 21 },
+  eventRow: { marginHorizontal: 16, marginVertical: 6, alignItems: "center" },
+  eventText: { color: "#484f58", fontSize: 12 },
   workingRow: {
     flexDirection: "row",
     alignItems: "center",
