@@ -20,11 +20,15 @@ export function IconButton({ symbol, fallback, onPress, size = 32, accent }: Pro
   const inner =
     SwiftUI !== null ? (
       <SwiftUI.Host
-        style={{ width: size * 0.55, height: size * 0.55, backgroundColor: "transparent" }}
+        style={{ width: size * 0.6, height: size * 0.6 }}
         colorScheme="dark"
         pointerEvents="none"
       >
-        <SwiftUI.Image systemName={symbol as never} />
+        <SwiftUI.Image
+          systemName={symbol as never}
+          size={size * 0.5}
+          color={accent ? "#ffffff" : "#c9d1d9"}
+        />
       </SwiftUI.Host>
     ) : (
       <Text style={styles.glyph}>{fallback}</Text>
