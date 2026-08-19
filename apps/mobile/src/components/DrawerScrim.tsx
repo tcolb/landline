@@ -77,7 +77,12 @@ function Scrim() {
       if (previous === 0 && value > 0) {
         runOnJS(dismissAllKeyboards)();
       }
-      if ((value === 1 && previous < 1) || (value === 0 && previous > 0)) {
+      // Springs approach the endpoints asymptotically — fire on crossing
+      // the near-threshold so the tap lands with the perceived settle.
+      if (
+        (value >= 0.93 && previous < 0.93) ||
+        (value <= 0.07 && previous > 0.07)
+      ) {
         runOnJS(settleHaptic)();
       }
     },

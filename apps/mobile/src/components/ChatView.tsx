@@ -28,6 +28,7 @@ import {
 } from "react-native";
 import { AttachHandle, attachChat, ConnectionConfig } from "../client";
 import { kbc } from "../kb-native";
+import { onDismissAllKeyboards } from "../kb";
 import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { ChatItem, inputMessage } from "../proto";
 import { useSessions } from "../sessions";
@@ -78,9 +79,6 @@ function NativeComposer({
   const S = SwiftUI!;
   const m = SwiftUIModifiers!;
   const draft = useRef("");
-  // Animation trigger: SwiftUI animates layout changes keyed on this value,
-  // masking the one-frame matchContents resize lag during growth.
-  const [textLen, setTextLen] = useState(0);
   const field = useRef<import("@expo/ui/swift-ui").TextFieldRef>(null);
   const send = () => {
     const text = draft.current.trim();
@@ -89,49 +87,55 @@ function NativeComposer({
     draft.current = "";
     field.current?.clear();
   };
+  // Swipe-away (or any app-wide dismissal): the SwiftUI TextField is
+  // invisible to RN's Keyboard.dismiss(), blur it via its native ref.
+  useEffect(() => onDismissAllKeyboards(() => void field.current?.blur()), []);
   return (
-    <S.Host style={styles.nativeHost} colorScheme="dark" matchContents={{ vertical: true }}>
-      <S.VStack
-        spacing={2}
-        modifiers={[
-          m.padding({
-            top: 6,
-            bottom: SEND_GAP,
-            leading: 4,
-            trailing: SEND_GAP,
-          }),
-          m.glassEffect({
-            glass: { variant: "regular" },
-            shape: "roundedRectangle",
-            cornerRadius: BUBBLE_RADIUS,
-          }),
-          // Bottom-anchor within the host: while RN's matchContents resize
-          // lags a frame behind SwiftUI's layout, the extra line overflows
-          // upward (hosting views don't clip) instead of shoving the send
-          // row below the clip — growth reads as instant.
-          m.frame({ maxWidth: 9999, maxHeight: 9999, alignment: "bottom" }),
-          // Near-instant ease over line changes: masks the resize lag frame
-          // without reading as an animation.
-          m.animation(m.Animation.easeOut({ duration: 0.12 }), textLen),
-        ]}
+    <View>
+      {/* Growing part: glass panel + field. Reserves the send strip via
+          bottom padding; bottom-anchored so the matchContents lag frame
+          overflows upward. */}
+      <S.Host
+        style={styles.nativeHost}
+        colorScheme="dark"
+        matchContents={{ vertical: true }}
       >
-        <S.TextField
-          ref={field}
-          axis="vertical"
-          placeholder={`Ask ${agentName}`}
-          onTextChange={(t) => {
-            draft.current = t;
-            setTextLen(t.length);
-          }}
+        <S.VStack
           modifiers={[
-            m.font({ size: 18 }),
-            m.lineLimit(5),
-            m.padding({ leading: 12, trailing: 12, top: 8 }),
-            m.textFieldStyle("plain"),
+            m.glassEffect({
+              glass: { variant: "regular" },
+              shape: "roundedRectangle",
+              cornerRadius: BUBBLE_RADIUS,
+            }),
+            m.frame({ maxWidth: 9999, maxHeight: 9999, alignment: "bottom" }),
           ]}
-        />
-        <S.HStack>
-          <S.Spacer />
+        >
+          <S.TextField
+            ref={field}
+            axis="vertical"
+            placeholder={`Ask ${agentName}`}
+            onTextChange={(t) => {
+              draft.current = t;
+            }}
+            modifiers={[
+              m.font({ size: 18 }),
+              m.lineLimit(5),
+              m.padding({
+                leading: 16,
+                trailing: 16,
+                top: 14,
+                bottom: SEND_DIAMETER + SEND_GAP + 6,
+              }),
+              m.textFieldStyle("plain"),
+            ]}
+          />
+        </S.VStack>
+      </S.Host>
+      {/* Fixed part: the send circle in its own host, absolutely seated in
+          the corner — completely decoupled from text growth, so it can
+          never jump. */}
+      <View style={styles.sendSeat}>
+        <S.Host style={{ width: SEND_DIAMETER, height: SEND_DIAMETER }} colorScheme="dark">
           <S.Image
             systemName="arrow.up"
             size={16}
@@ -145,9 +149,9 @@ function NativeComposer({
               }),
             ]}
           />
-        </S.HStack>
-      </S.VStack>
-    </S.Host>
+        </S.Host>
+      </View>
+    </View>
   );
 }
 
@@ -410,6 +414,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   nativeHost: { width: "100%" },
+  sendSeat: { position: "absolute", right: SEND_GAP, bottom: SEND_GAP },
   // Fallback composer.
   fallbackRow: {
     flexDirection: "row",
