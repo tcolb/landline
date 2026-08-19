@@ -355,6 +355,31 @@ classified action chips (file edits, commands, subagent spawns, web
 lookups) with linked results, alongside the prose. Wire shape:
 PROTOCOL.md § chat mode.
 
+**The hybrid bar.** A harness gets `interfaces = terminal + chat`
+(hybrid) only when ALL of the chat item types extract cleanly from its
+live mirror: user text, assistant prose, thinking, tool calls with
+stable ids, and results linked by those ids with an error flag. If the
+mirror is missing, partial, or structurally hard (e.g. a tree-shaped
+transcript where a naive append-tail surfaces abandoned branches —
+pi's format is a tree with parentId/branching/compaction), the harness
+ships with ONE interface: terminal-only, or chat-only via its
+structured mode. No degraded hybrids — a chat view that silently drops
+actions misrepresents the session. Claude passes the bar (verified
+live); pi stays terminal-only until active-branch walking is
+implemented and validated against real files.
+
+**Chat item API roadmap** (all additive):
+1. Now: text / thinking / action / action_result with category, title,
+   target, call_id.
+2. Next: `ok` flag on results (both harnesses carry is_error); result
+   text capping with a truncated marker; "working" indicator — client
+   derives running-ness from unresolved call_ids, and the daemon can
+   supplement with a PTY-activity busy signal no transcript provides.
+3. Reserved: `chat_update` response type for streaming item mutation
+   (chat-native sessions); `parent_call_id` for nesting subagent
+   activity under its spawning action; event items for model change /
+   compaction; content parts (images).
+
 ### Repo-centric workspaces
 
 "Spin up claude for a repo" is the primary flow; a fixed directory in a
