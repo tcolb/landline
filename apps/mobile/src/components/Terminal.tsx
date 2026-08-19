@@ -604,15 +604,39 @@ export function Terminal({ cfg, session, onBack }: Props) {
     handle.current?.send(inputMessage(text, seq));
   };
 
+  // Hold-to-repeat for bar keys (the system keyboard's delete only
+  // auto-repeats for full UITextInput implementers, which UIKeyInput is
+  // not): after an initial delay, repeat with mild acceleration until
+  // release.
+  const repeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopRepeat = () => {
+    if (repeatTimer.current !== null) {
+      clearTimeout(repeatTimer.current);
+      repeatTimer.current = null;
+    }
+  };
+  const startRepeat = (seq: string) => {
+    stopRepeat();
+    let interval = 110;
+    const tick = () => {
+      sendText(seq);
+      interval = Math.max(40, interval - 8);
+      repeatTimer.current = setTimeout(tick, interval);
+    };
+    repeatTimer.current = setTimeout(tick, 350);
+  };
+  useEffect(() => stopRepeat, []);
+
   const key = (
     label: string,
     seq: string,
-    opts?: { sticky?: boolean; longPressSeq?: string },
+    opts?: { sticky?: boolean; repeat?: boolean },
   ) => (
     <Pressable
       key={label}
       onPress={() => (opts?.sticky ? setCtrl((v) => !v) : sendText(seq))}
-      onLongPress={opts?.longPressSeq ? () => sendText(opts.longPressSeq!) : undefined}
+      onPressIn={opts?.repeat ? () => startRepeat(seq) : undefined}
+      onPressOut={opts?.repeat ? stopRepeat : undefined}
       style={[styles.key, opts?.sticky && ctrl ? styles.keyActive : null]}
     >
       <Text style={styles.keyText}>{label}</Text>
@@ -671,11 +695,11 @@ export function Terminal({ cfg, session, onBack }: Props) {
         {key("tab", "\t")}
         {key("ctrl", "", { sticky: true })}
         {key("^C", "\x03")}
-        {key("←", "\x1b[D")}
-        {key("↓", "\x1b[B")}
-        {key("↑", "\x1b[A")}
-        {key("→", "\x1b[C")}
-        {key("⌫", "\x7f", { longPressSeq: "\x17" /* Ctrl-W: delete word */ })}
+        {key("←", "\x1b[D", { repeat: true })}
+        {key("↓", "\x1b[B", { repeat: true })}
+        {key("↑", "\x1b[A", { repeat: true })}
+        {key("→", "\x1b[C", { repeat: true })}
+        {key("⌫", "\x7f", { repeat: true })}
         <Pressable
           style={styles.key}
           onPress={() => {
