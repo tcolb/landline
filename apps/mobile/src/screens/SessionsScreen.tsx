@@ -38,7 +38,8 @@ export function SessionsScreen({ navigation, cfg, onDisconnect }: Props) {
     });
   }, [navigation, onDisconnect]);
 
-  const open = (s: SessionInfo) => navigation.navigate("Terminal", { session: s.id });
+  const open = (s: SessionInfo) =>
+    navigation.navigate("Terminal", { session: s.id, chat: s.chat === true });
   const detail = (s: SessionInfo) =>
     `${s.environment} · ${s.cmd.join(" ")}${
       s.status.state === "exited" ? ` · exited(${s.status.code ?? "?"})` : ""

@@ -21,6 +21,8 @@ import { useEnvironments, useTemplates } from "../sessions";
 
 type Props = NativeStackScreenProps<RootStackParams, "Spawn"> & {
   cfg: ConnectionConfig;
+  /** Drawer layout: handle the spawned session instead of stack navigation. */
+  onSpawned?(info: import("../proto").SessionInfo): void;
 };
 
 interface Advanced {
@@ -66,7 +68,7 @@ export function SpawnScreen(props: Props) {
   return SwiftUI ? <NativeSpawn {...props} /> : <LegacySpawn {...props} />;
 }
 
-function NativeSpawn({ navigation, cfg }: Props) {
+function NativeSpawn({ navigation, cfg, onSpawned }: Props) {
   const ui = SwiftUI!;
   const templates = useTemplates(cfg);
   const environments = useEnvironments(cfg);
@@ -103,7 +105,8 @@ function NativeSpawn({ navigation, cfg }: Props) {
         envOverride,
         adv.current,
       );
-      navigation.replace("Terminal", { session: info.id });
+      if (onSpawned) onSpawned(info);
+      else navigation.replace("Terminal", { session: info.id, chat: info.chat === true });
     } catch (e: any) {
       setError(String(e.message ?? e));
     } finally {
@@ -215,7 +218,7 @@ function NativeSpawn({ navigation, cfg }: Props) {
   );
 }
 
-function LegacySpawn({ navigation, cfg }: Props) {
+function LegacySpawn({ navigation, cfg, onSpawned }: Props) {
   const templates = useTemplates(cfg);
   const environments = useEnvironments(cfg);
   const [selected, setSelected] = useState<TemplateInfo | null>(null);
@@ -236,7 +239,8 @@ function LegacySpawn({ navigation, cfg }: Props) {
     setError("");
     try {
       const info = await doSpawn(cfg, selected?.name ?? null, params, envOverride, adv);
-      navigation.replace("Terminal", { session: info.id });
+      if (onSpawned) onSpawned(info);
+      else navigation.replace("Terminal", { session: info.id, chat: info.chat === true });
     } catch (e: any) {
       setError(String(e.message ?? e));
     } finally {

@@ -56,6 +56,17 @@ export interface SessionInfo {
   rows: number;
   cols: number;
   status: SessionStatus;
+  /** Chat view available (hybrid session). */
+  chat?: boolean;
+}
+
+/** One entry in a session's chat view. */
+export interface ChatItem {
+  id: number;
+  role: "user" | "assistant" | "tool" | "system";
+  kind: "text" | "tool_use" | "tool_result" | "event";
+  text: string;
+  tool?: string;
 }
 
 export interface SpawnRequest {
@@ -103,7 +114,7 @@ export type Request =
   | { type: "spawn"; spawn: SpawnRequest }
   | { type: "ls" }
   | { type: "kill"; session: string }
-  | { type: "attach"; session: string; mode: "frames" | "bytes" }
+  | { type: "attach"; session: string; mode: "frames" | "bytes" | "chat" }
   | { type: "watch" }
   | { type: "input"; data: string; seq?: number } // base64
   | { type: "resize"; rows: number; cols: number }
@@ -124,6 +135,8 @@ export type Response =
   | { type: "stats"; stats: Record<string, unknown> }
   | { type: "templates"; templates: TemplateInfo[] }
   | { type: "environments"; environments: EnvironmentInfo[] }
+  | { type: "chat_snapshot"; items: ChatItem[] }
+  | { type: "chat_item"; item: ChatItem }
   | { type: "exited"; code: number | null };
 
 // Base64 helpers, dependency-free (Hermes has atob/btoa, but UTF-8 needs

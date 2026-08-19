@@ -5,6 +5,7 @@
 // a fresh connection per watch.
 
 import {
+  ChatItem,
   Frame,
   PROTOCOL_VERSION,
   Request,
@@ -146,6 +147,40 @@ export async function attachFrames(
   };
   ws.onclose = () => on.closed();
   ws.send(JSON.stringify({ type: "attach", session, mode: "frames" } satisfies Request));
+  return {
+    send: (req) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(req));
+    },
+    detach: () => {
+      if (ws.readyState === WebSocket.OPEN)
+        ws.send(JSON.stringify({ type: "detach" } satisfies Request));
+      ws.close();
+    },
+  };
+}
+
+/** Chat-mode attach on a dedicated connection (hybrid sessions). */
+export async function attachChat(
+  cfg: ConnectionConfig,
+  session: string,
+  on: {
+    snapshot(items: ChatItem[]): void;
+    item(item: ChatItem): void;
+    exited(code: number | null): void;
+    error(message: string): void;
+    closed(): void;
+  },
+): Promise<AttachHandle> {
+  const ws = await openSocket(cfg);
+  ws.onmessage = (ev) => {
+    const resp = JSON.parse(String(ev.data)) as Response;
+    if (resp.type === "chat_snapshot") on.snapshot(resp.items);
+    else if (resp.type === "chat_item") on.item(resp.item);
+    else if (resp.type === "exited") on.exited(resp.code);
+    else if (resp.type === "error") on.error(resp.message);
+  };
+  ws.onclose = () => on.closed();
+  ws.send(JSON.stringify({ type: "attach", session, mode: "chat" } satisfies Request));
   return {
     send: (req) => {
       if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(req));

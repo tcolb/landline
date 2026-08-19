@@ -1,0 +1,115 @@
+// The left drawer: sessions + spawn + disconnect — the app's home base in
+// the drawer layout. Selecting a session swaps the main scene in place.
+
+import { LegendList } from "@legendapp/list/react-native";
+import { useMutation } from "@tanstack/react-query";
+import React from "react";
+import { Pressable, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { ConnectionConfig } from "../client";
+import { SessionInfo } from "../proto";
+import { killSession, useSessions } from "../sessions";
+
+export interface SessionSelection {
+  id: string;
+  chat: boolean;
+}
+
+interface Props {
+  cfg: ConnectionConfig;
+  selected: string | null;
+  onSelect(sel: SessionSelection): void;
+  onSpawn(): void;
+  onDisconnect(): void;
+}
+
+export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }: Props) {
+  const sessions = useSessions(cfg);
+  const kill = useMutation({ mutationFn: (id: string) => killSession(cfg, id) });
+
+  const renderItem = ({ item }: { item: SessionInfo }) => {
+    const running = item.status.state === "running";
+    const active = item.id === selected;
+    return (
+      <Pressable
+        style={[styles.row, active && styles.rowActive]}
+        onPress={() => onSelect({ id: item.id, chat: item.chat === true })}
+        onLongPress={() => running && kill.mutate(item.id)}
+      >
+        <View style={[styles.dot, { backgroundColor: running ? "#3fb950" : "#8b949e" }]} />
+        <View style={styles.rowBody}>
+          <Text style={styles.name} numberOfLines={1}>
+            {item.name}
+          </Text>
+          <Text style={styles.dim} numberOfLines={1}>
+            {item.cmd.join(" ")}
+            {item.status.state === "exited" ? ` · exited(${item.status.code ?? "?"})` : ""}
+          </Text>
+        </View>
+      </Pressable>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.root} edges={["top", "bottom", "left"]}>
+      <View style={styles.header}>
+        <Text style={styles.title}>landline</Text>
+        <Pressable onPress={onSpawn} hitSlop={12} style={styles.newBtn}>
+          <Text style={styles.newText}>＋</Text>
+        </Pressable>
+      </View>
+      <LegendList
+        data={sessions.data ?? []}
+        keyExtractor={(s: SessionInfo) => s.id}
+        renderItem={renderItem}
+        estimatedItemSize={54}
+        recycleItems
+        ListEmptyComponent={
+          <Text style={[styles.dim, styles.empty]}>
+            {sessions.isLoading ? "loading…" : "no sessions"}
+          </Text>
+        }
+      />
+      <Pressable onPress={onDisconnect} style={styles.footer}>
+        <Text style={styles.dim}>disconnect</Text>
+      </Pressable>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: "#010409" },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  title: { color: "#c9d1d9", fontSize: 18, fontWeight: "700" },
+  newBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: "#238636",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  newText: { color: "#fff", fontSize: 18, fontWeight: "600" },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginHorizontal: 6,
+    borderRadius: 8,
+  },
+  rowActive: { backgroundColor: "#161b22" },
+  rowBody: { flex: 1 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  name: { color: "#c9d1d9", fontSize: 14, fontWeight: "500" },
+  dim: { color: "#8b949e", fontSize: 11 },
+  empty: { textAlign: "center", marginTop: 40 },
+  footer: { padding: 16 },
+});

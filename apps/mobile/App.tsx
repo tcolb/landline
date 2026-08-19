@@ -11,7 +11,11 @@ import React, { useEffect, useState } from "react";
 import { ScrollView, StyleSheet, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionConfig } from "./src/client";
+import { drawerKit } from "./src/drawer-nav";
 import { ConnectScreen } from "./src/screens/ConnectScreen";
+import { useSelection } from "./src/selection";
+import { SessionDrawer } from "./src/screens/SessionDrawer";
+import { SessionHost } from "./src/screens/SessionHost";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
 import { SpawnScreen } from "./src/screens/SpawnScreen";
 import { TerminalScreen } from "./src/screens/TerminalScreen";
@@ -23,11 +27,68 @@ export type RootStackParams = {
   Connect: undefined;
   Sessions: undefined;
   Spawn: undefined;
-  Terminal: { session: string };
+  Terminal: { session: string; chat?: boolean };
 };
 
 const Stack = createNativeStackNavigator<RootStackParams>();
 export const navigationRef = createNavigationContainerRef<RootStackParams>();
+const Drawer = drawerKit ? drawerKit.createDrawerNavigator() : null;
+
+/** Claude-app-style layout: main scene slides right revealing the session
+ * drawer; the displaced scene keeps a rounded, bordered edge. */
+function DrawerMain({
+  cfg,
+  onDisconnect,
+}: {
+  cfg: ConnectionConfig;
+  onDisconnect(): void;
+}) {
+  const { selection, setSelection } = useSelection();
+  const D = Drawer!;
+  return (
+    <D.Navigator
+      screenOptions={{
+        headerShown: false,
+        drawerType: "slide",
+        overlayColor: "transparent",
+        drawerStyle: { backgroundColor: "#010409", width: 290 },
+        sceneStyle: {
+          backgroundColor: "#0d1117",
+          borderRadius: 14,
+          overflow: "hidden",
+          borderWidth: StyleSheet.hairlineWidth,
+          borderColor: "#21262d",
+        },
+        swipeEdgeWidth: 80,
+      }}
+      drawerContent={(props) => (
+        <SessionDrawer
+          cfg={cfg}
+          selected={selection?.id ?? null}
+          onSelect={(sel) => {
+            setSelection(sel);
+            props.navigation.closeDrawer();
+          }}
+          onSpawn={() => {
+            props.navigation.closeDrawer();
+            navigationRef.navigate("Spawn");
+          }}
+          onDisconnect={onDisconnect}
+        />
+      )}
+    >
+      <D.Screen name="Session">
+        {(props: any) => (
+          <SessionHost
+            cfg={cfg}
+            selection={selection}
+            openDrawer={() => props.navigation.openDrawer()}
+          />
+        )}
+      </D.Screen>
+    </D.Navigator>
+  );
+}
 
 const theme = {
   ...DarkTheme,
@@ -125,7 +186,10 @@ export default function App() {
   }
   if (!hydrated) return null;
 
+  const Root = drawerKit?.GestureHandlerRootView ?? React.Fragment;
+  const rootProps = drawerKit ? { style: { flex: 1 } } : {};
   return (
+    <Root {...rootProps}>
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         <StatusBar style="light" />
@@ -143,6 +207,34 @@ export default function App() {
                       }}
                     />
                   )}
+                </Stack.Screen>
+              </Stack.Navigator>
+            ) : Drawer !== null ? (
+              <Stack.Navigator>
+                <Stack.Screen name="Sessions" options={{ headerShown: false }}>
+                  {() => (
+                    <DrawerMain cfg={config} onDisconnect={() => setConnected(false)} />
+                  )}
+                </Stack.Screen>
+                <Stack.Screen
+                  name="Spawn"
+                  options={{ presentation: "modal", title: "New Session" }}
+                >
+                  {(props) => (
+                    <SpawnScreen
+                      {...props}
+                      cfg={config}
+                      onSpawned={(info) => {
+                        useSelection
+                          .getState()
+                          .setSelection({ id: info.id, chat: info.chat === true });
+                        props.navigation.goBack();
+                      }}
+                    />
+                  )}
+                </Stack.Screen>
+                <Stack.Screen name="Terminal" options={{ headerShown: false }}>
+                  {(props) => <TerminalScreen {...props} cfg={config} />}
                 </Stack.Screen>
               </Stack.Navigator>
             ) : (
@@ -171,6 +263,7 @@ export default function App() {
         </ErrorBoundary>
       </QueryClientProvider>
     </SafeAreaProvider>
+    </Root>
   );
 }
 
