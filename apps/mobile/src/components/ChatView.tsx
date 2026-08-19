@@ -96,10 +96,18 @@ export function ChatView({ cfg, session }: Props) {
         </View>
       );
     }
-    const user = item.role === "user";
+    // Genre convention: only the user's messages sit in a bubble; the
+    // agent's prose flows as full-width text blocks.
+    if (item.role === "user") {
+      return (
+        <View style={[styles.bubble, styles.userBubble]}>
+          <Text style={styles.userText}>{item.text}</Text>
+        </View>
+      );
+    }
     return (
-      <View style={[styles.bubble, user ? styles.userBubble : styles.assistantBubble]}>
-        <Text style={user ? styles.userText : styles.assistantText}>{item.text}</Text>
+      <View style={styles.assistantBlock}>
+        <Text style={styles.assistantText}>{item.text}</Text>
       </View>
     );
   };
@@ -190,9 +198,13 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   userBubble: { alignSelf: "flex-end", backgroundColor: "#238636" },
-  assistantBubble: { alignSelf: "flex-start", backgroundColor: "#1e1e1e" },
   userText: { color: "#fff", fontSize: 15 },
-  assistantText: { color: "#c9d1d9", fontSize: 15 },
+  assistantBlock: {
+    alignSelf: "stretch",
+    marginHorizontal: 16,
+    marginVertical: 6,
+  },
+  assistantText: { color: "#c9d1d9", fontSize: 15, lineHeight: 22 },
   toolRow: {
     alignSelf: "stretch",
     backgroundColor: "#141414",
