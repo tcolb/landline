@@ -353,6 +353,16 @@ export function Terminal({ cfg, session, onBack, showBack = true }: Props) {
   const [inputEpoch, setInputEpoch] = useState(0);
   /** iOS native key view focus (soft keyboard visibility). */
   const [kbFocused, setKbFocused] = useState(true);
+  // Drawer undock (or any app-wide dismissal): RN's Keyboard.dismiss()
+  // cannot see the native key-input view, so blur it ourselves.
+  useEffect(
+    () =>
+      onDismissAllKeyboards(() => {
+        setKbFocused(false);
+        inputRef.current?.blur();
+      }),
+    [],
+  );
   const [focusNonce, setFocusNonce] = useState(1);
   const inputRef = useRef<TextInput>(null);
   const ctrlRef = useRef(false);
