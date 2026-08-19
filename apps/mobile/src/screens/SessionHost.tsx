@@ -13,6 +13,10 @@ import { IconButton } from "../components/IconButton";
 import { Terminal } from "../components/Terminal";
 import { useSelection } from "../selection";
 
+/** Bump on every UI change batch; shows in the dev bar so a stale bundle
+ * is immediately visible on-device. */
+const JS_REV = "r18";
+
 interface Props {
   cfg: ConnectionConfig;
   openDrawer(): void;
@@ -40,8 +44,11 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
           <Text style={styles.title}>{selection ? selection.id : "landline"}</Text>
         )}
       </View>
-      {/* Balance the menu button so the center stays centered. */}
-      <View style={{ width: 44 }} />
+      {/* Balance the menu button so the center stays centered. In dev,
+          doubles as a bundle-freshness stamp. */}
+      <View style={{ width: 44, alignItems: "center", justifyContent: "center" }}>
+        {__DEV__ && <Text style={styles.stamp}>{JS_REV}</Text>}
+      </View>
     </View>
   );
 }
@@ -85,6 +92,7 @@ const styles = StyleSheet.create({
   },
   barCenter: { flex: 1, alignItems: "center" },
   title: { color: "#c9d1d9", fontSize: 15, fontWeight: "600" },
+  stamp: { color: "#30363d", fontSize: 10 },
   segments: {
     flexDirection: "row",
     backgroundColor: "#141414",
