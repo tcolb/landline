@@ -1,37 +1,107 @@
 import { LegendList } from "@legendapp/list/react-native";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useMutation } from "@tanstack/react-query";
-import React from "react";
+import React, { useLayoutEffect } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
+import type { RootStackParams } from "../../App";
 import { ConnectionConfig } from "../client";
+import { SwiftUI } from "../native-ui";
 import { SessionInfo } from "../proto";
 import { killSession, useSessions } from "../sessions";
 
-interface Props {
+type Props = NativeStackScreenProps<RootStackParams, "Sessions"> & {
   cfg: ConnectionConfig;
-  onOpen(session: SessionInfo): void;
-  onSpawn(): void;
   onDisconnect(): void;
-}
+};
 
-export function SessionsScreen({ cfg, onOpen, onSpawn, onDisconnect }: Props) {
+export function SessionsScreen({ navigation, cfg, onDisconnect }: Props) {
   const sessions = useSessions(cfg);
   const kill = useMutation({
     mutationFn: (id: string) => killSession(cfg, id),
     // No cache surgery needed: the watch event patches the list.
   });
 
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      title: "Sessions",
+      headerLargeTitle: true,
+      headerRight: () => (
+        <Pressable onPress={() => navigation.navigate("Spawn")} hitSlop={12}>
+          <Text style={styles.headerAction}>＋</Text>
+        </Pressable>
+      ),
+      headerLeft: () => (
+        <Pressable onPress={onDisconnect} hitSlop={12}>
+          <Text style={styles.headerDim}>disconnect</Text>
+        </Pressable>
+      ),
+    });
+  }, [navigation, onDisconnect]);
+
+  const open = (s: SessionInfo) => navigation.navigate("Terminal", { session: s.id });
+  const detail = (s: SessionInfo) =>
+    `${s.environment} · ${s.cmd.join(" ")}${
+      s.status.state === "exited" ? ` · exited(${s.status.code ?? "?"})` : ""
+    }`;
+
+  if (SwiftUI) {
+    const ui = SwiftUI;
+    const items = sessions.data ?? [];
+    return (
+      <ui.Host style={{ flex: 1 }} useViewportSizeMeasurement colorScheme="dark">
+        {items.length === 0 ? (
+          <ui.ContentUnavailableView
+            title={sessions.isLoading ? "Loading…" : "No sessions"}
+            systemImage="terminal"
+            description={sessions.isLoading ? "" : "Spawn one with the + button"}
+          />
+        ) : (
+          <ui.List>
+            {items.map((s) => (
+              <ui.SwipeActions key={s.id}>
+                <ui.Button onPress={() => open(s)}>
+                  <ui.HStack spacing={10}>
+                    <ui.Image
+                      systemName={
+                        s.status.state === "running" ? "circle.fill" : "circle"
+                      }
+                    />
+                    <ui.VStack alignment="leading" spacing={2}>
+                      <ui.Text>{`${s.name} (${s.id})`}</ui.Text>
+                      <ui.Text>{detail(s)}</ui.Text>
+                    </ui.VStack>
+                    <ui.Spacer />
+                  </ui.HStack>
+                </ui.Button>
+                {s.status.state === "running" && (
+                  <ui.SwipeActions.Actions edge="trailing">
+                    <ui.Button
+                      role="destructive"
+                      label="Kill"
+                      onPress={() => kill.mutate(s.id)}
+                    />
+                  </ui.SwipeActions.Actions>
+                )}
+              </ui.SwipeActions>
+            ))}
+          </ui.List>
+        )}
+      </ui.Host>
+    );
+  }
+
+  // React Native fallback (Android / pre-module binaries).
   const renderItem = ({ item }: { item: SessionInfo }) => {
     const running = item.status.state === "running";
     return (
-      <Pressable style={styles.row} onPress={() => onOpen(item)}>
+      <Pressable style={styles.row} onPress={() => open(item)}>
         <View style={[styles.dot, { backgroundColor: running ? "#3fb950" : "#8b949e" }]} />
         <View style={styles.rowBody}>
           <Text style={styles.name}>
             {item.name} <Text style={styles.dim}>({item.id})</Text>
           </Text>
           <Text style={styles.dim} numberOfLines={1}>
-            {item.environment} · {item.cmd.join(" ")}
-            {item.status.state === "exited" ? ` · exited(${item.status.code ?? "?"})` : ""}
+            {detail(item)}
           </Text>
         </View>
         {running && (
@@ -50,17 +120,6 @@ export function SessionsScreen({ cfg, onOpen, onSpawn, onDisconnect }: Props) {
 
   return (
     <View style={styles.root}>
-      <View style={styles.header}>
-        <Text style={styles.title}>sessions</Text>
-        <View style={styles.headerBtns}>
-          <Pressable style={styles.btn} onPress={onSpawn}>
-            <Text style={styles.btnText}>+ spawn</Text>
-          </Pressable>
-          <Pressable style={styles.btnGhost} onPress={onDisconnect}>
-            <Text style={styles.dim}>disconnect</Text>
-          </Pressable>
-        </View>
-      </View>
       {error !== "" && <Text style={styles.error}>{error}</Text>}
       <LegendList
         data={sessions.data ?? []}
@@ -81,24 +140,9 @@ export function SessionsScreen({ cfg, onOpen, onSpawn, onDisconnect }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0d1117", paddingTop: 8 },
-  header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  headerBtns: { flexDirection: "row", gap: 12, alignItems: "center" },
-  title: { color: "#c9d1d9", fontSize: 20, fontWeight: "600" },
-  btn: {
-    backgroundColor: "#238636",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  btnGhost: { paddingVertical: 6 },
-  btnText: { color: "#fff", fontWeight: "600" },
+  root: { flex: 1, backgroundColor: "#0d1117" },
+  headerAction: { color: "#3fb950", fontSize: 22, fontWeight: "600" },
+  headerDim: { color: "#8b949e", fontSize: 13 },
   row: {
     flexDirection: "row",
     alignItems: "center",
@@ -113,7 +157,7 @@ const styles = StyleSheet.create({
   name: { color: "#c9d1d9", fontSize: 15 },
   dim: { color: "#8b949e", fontSize: 12 },
   empty: { textAlign: "center", marginTop: 48 },
-  error: { color: "#f85149", paddingHorizontal: 16, paddingBottom: 4 },
+  error: { color: "#f85149", paddingHorizontal: 16, paddingVertical: 4 },
   killBtn: {
     backgroundColor: "#21262d",
     borderRadius: 6,

@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import React, { useRef, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -8,24 +9,134 @@ import {
   TextInput,
   View,
 } from "react-native";
+import type { RootStackParams } from "../../App";
 import { ConnectionConfig, ControlConn } from "../client";
-import { SessionInfo } from "../proto";
+import { SwiftUI } from "../native-ui";
 
-interface Props {
+type Props = NativeStackScreenProps<RootStackParams, "Spawn"> & {
   cfg: ConnectionConfig;
-  onSpawned(info: SessionInfo): void;
-  onBack(): void;
+};
+
+interface SpawnFields {
+  template: string;
+  params: string;
+  command: string;
+  name: string;
+  image: string;
+  cwd: string;
 }
 
-/** Template spawn (name + key=value params) or inline command; mirrors the
- * CLI: `landline spawn TEMPLATE -p k=v` / `landline spawn -- CMD`. */
-export function SpawnScreen({ cfg, onSpawned, onBack }: Props) {
-  const [template, setTemplate] = useState("");
-  const [params, setParams] = useState("");
-  const [command, setCommand] = useState("");
-  const [name, setName] = useState("");
-  const [image, setImage] = useState("");
-  const [cwd, setCwd] = useState("");
+async function doSpawn(cfg: ConnectionConfig, f: SpawnFields) {
+  const parsedParams: Record<string, string> = {};
+  for (const line of f.params.split("\n")) {
+    const t = line.trim();
+    if (t === "") continue;
+    const eq = t.indexOf("=");
+    if (eq < 0) throw new Error(`param wants KEY=VALUE, got '${t}'`);
+    parsedParams[t.slice(0, eq)] = t.slice(eq + 1);
+  }
+  const cmd = f.command.trim() === "" ? null : f.command.trim().split(/\s+/);
+  if (f.template.trim() === "" && cmd === null)
+    throw new Error("template or command required");
+  const conn = await ControlConn.open(cfg);
+  try {
+    return await conn.spawn({
+      template: f.template.trim() || null,
+      params: parsedParams,
+      name: f.name.trim() || null,
+      cmd,
+      cwd: f.cwd.trim() || null,
+      env: null,
+      image: f.image.trim() || null,
+      rows: 24,
+      cols: 80,
+    });
+  } finally {
+    conn.close();
+  }
+}
+
+export function SpawnScreen(props: Props) {
+  return SwiftUI ? <NativeSpawn {...props} /> : <LegacySpawn {...props} />;
+}
+
+/** Mirrors the CLI: `landline spawn TEMPLATE -p k=v` / `landline spawn -- CMD`. */
+function NativeSpawn({ navigation, cfg }: Props) {
+  const ui = SwiftUI!;
+  const fields = useRef<SpawnFields>({
+    template: "",
+    params: "",
+    command: "",
+    name: "",
+    image: "",
+    cwd: "",
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const spawn = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      const info = await doSpawn(cfg, fields.current);
+      navigation.replace("Terminal", { session: info.id });
+    } catch (e: any) {
+      setError(String(e.message ?? e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = (key: keyof SpawnFields, placeholder: string, multiline = false) => (
+    <ui.TextField
+      placeholder={placeholder}
+      onTextChange={(t) => (fields.current[key] = t)}
+      axis={multiline ? "vertical" : "horizontal"}
+    />
+  );
+
+  return (
+    <ui.Host style={{ flex: 1 }} useViewportSizeMeasurement colorScheme="dark">
+      <ui.Form>
+        <ui.Section title="Template">
+          {field("template", "template name, e.g. webapp-fix")}
+          {field("params", "params, KEY=VALUE per line", true)}
+        </ui.Section>
+        <ui.Section title="Command (instead of / over template)">
+          {field("command", "claude")}
+        </ui.Section>
+        <ui.Section title="Options">
+          {field("name", "session name")}
+          {field("image", "container image, e.g. ubuntu:24.04")}
+          {field("cwd", "working directory")}
+        </ui.Section>
+        {error !== "" && (
+          <ui.Section title="Error">
+            <ui.Text>{error}</ui.Text>
+          </ui.Section>
+        )}
+        <ui.Section>
+          <ui.Button
+            label={busy ? "Spawning…" : "Spawn"}
+            systemImage="plus.circle"
+            onPress={spawn}
+          />
+        </ui.Section>
+      </ui.Form>
+    </ui.Host>
+  );
+}
+
+function LegacySpawn({ navigation, cfg }: Props) {
+  const [f, setF] = useState<SpawnFields>({
+    template: "",
+    params: "",
+    command: "",
+    name: "",
+    image: "",
+    cwd: "",
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -33,31 +144,8 @@ export function SpawnScreen({ cfg, onSpawned, onBack }: Props) {
     setBusy(true);
     setError("");
     try {
-      const parsedParams: Record<string, string> = {};
-      for (const line of params.split("\n")) {
-        const t = line.trim();
-        if (t === "") continue;
-        const eq = t.indexOf("=");
-        if (eq < 0) throw new Error(`param wants KEY=VALUE, got '${t}'`);
-        parsedParams[t.slice(0, eq)] = t.slice(eq + 1);
-      }
-      const cmd = command.trim() === "" ? null : command.trim().split(/\s+/);
-      if (template.trim() === "" && cmd === null)
-        throw new Error("template or command required");
-      const conn = await ControlConn.open(cfg);
-      const info = await conn.spawn({
-        template: template.trim() || null,
-        params: parsedParams,
-        name: name.trim() || null,
-        cmd,
-        cwd: cwd.trim() || null,
-        env: null,
-        image: image.trim() || null,
-        rows: 24,
-        cols: 80,
-      });
-      conn.close();
-      onSpawned(info);
+      const info = await doSpawn(cfg, f);
+      navigation.replace("Terminal", { session: info.id });
     } catch (e: any) {
       setError(String(e.message ?? e));
     } finally {
@@ -66,18 +154,17 @@ export function SpawnScreen({ cfg, onSpawned, onBack }: Props) {
   };
 
   const field = (
+    key: keyof SpawnFields,
     label: string,
-    value: string,
-    set: (v: string) => void,
     placeholder: string,
     multiline = false,
   ) => (
-    <View key={label}>
+    <View key={key}>
       <Text style={styles.label}>{label}</Text>
       <TextInput
         style={[styles.input, multiline && styles.multiline]}
-        value={value}
-        onChangeText={set}
+        value={f[key]}
+        onChangeText={(t) => setF({ ...f, [key]: t })}
         placeholder={placeholder}
         placeholderTextColor="#484f58"
         autoCapitalize="none"
@@ -89,18 +176,12 @@ export function SpawnScreen({ cfg, onSpawned, onBack }: Props) {
 
   return (
     <ScrollView style={styles.root} keyboardShouldPersistTaps="handled">
-      <View style={styles.header}>
-        <Pressable onPress={onBack}>
-          <Text style={styles.back}>‹ back</Text>
-        </Pressable>
-        <Text style={styles.title}>spawn session</Text>
-      </View>
-      {field("template", template, setTemplate, "webapp-fix (optional)")}
-      {field("params (KEY=VALUE per line)", params, setParams, "branch=main", true)}
-      {field("command (instead of / over template)", command, setCommand, "claude")}
-      {field("name", name, setName, "fix-login (optional)")}
-      {field("container image", image, setImage, "ubuntu:24.04 (optional)")}
-      {field("working directory", cwd, setCwd, "/home/me/project (optional)")}
+      {field("template", "template", "webapp-fix (optional)")}
+      {field("params", "params (KEY=VALUE per line)", "branch=main", true)}
+      {field("command", "command (instead of / over template)", "claude")}
+      {field("name", "name", "fix-login (optional)")}
+      {field("image", "container image", "ubuntu:24.04 (optional)")}
+      {field("cwd", "working directory", "/home/me/project (optional)")}
       {error !== "" && <Text style={styles.error}>{error}</Text>}
       <Pressable style={styles.button} onPress={spawn} disabled={busy}>
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>spawn</Text>}
@@ -112,9 +193,6 @@ export function SpawnScreen({ cfg, onSpawned, onBack }: Props) {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#0d1117", padding: 16 },
-  header: { flexDirection: "row", alignItems: "center", gap: 16, marginBottom: 16 },
-  back: { color: "#58a6ff", fontSize: 16 },
-  title: { color: "#c9d1d9", fontSize: 20, fontWeight: "600" },
   label: { color: "#8b949e", fontSize: 12, marginBottom: 4 },
   input: {
     backgroundColor: "#161b22",
