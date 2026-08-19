@@ -8,7 +8,7 @@
 
 import { Canvas, LinearGradient, Rect, vec } from "@shopify/react-native-skia";
 import React from "react";
-import { Dimensions, StyleSheet } from "react-native";
+import { Dimensions, Keyboard, StyleSheet } from "react-native";
 import { useScreenRadius } from "../screen-radius";
 
 const kit: {
@@ -39,6 +39,10 @@ const kit: {
   }
 })();
 
+function dismissKeyboard() {
+  Keyboard.dismiss();
+}
+
 /** Light impact when the drawer settles open or closed. Guarded: no-op
  * on binaries built before expo-haptics was added. */
 const settleHaptic = (() => {
@@ -59,12 +63,16 @@ function Scrim() {
   const { width, height } = Dimensions.get("window");
   const progress = k.useDrawerProgress();
   // Fire once when the drawer settles at either end (dock/undock release),
-  // not on mount and not mid-drag.
+  // not on mount and not mid-drag; dismiss the keyboard the moment the
+  // card first moves off its docked position.
   k.useAnimatedReaction(
     () => progress.value ?? 0,
     (value, previous) => {
       "worklet";
       if (previous === null || previous === value) return;
+      if (previous === 0 && value > 0) {
+        k.runOnJS(dismissKeyboard)();
+      }
       if ((value === 1 && previous < 1) || (value === 0 && previous > 0)) {
         k.runOnJS(settleHaptic)();
       }
@@ -154,7 +162,7 @@ function BarFade({ children }: { children: React.ReactNode }) {
   // is a beat of blank card top before the bar leaves the screen.
   const style = k.useAnimatedStyle(() => {
     const p = progress.value ?? 0;
-    return { opacity: Math.max(0, 1 - p / 0.6) };
+    return { opacity: Math.max(0, 1 - p / 0.4) };
   });
   const A = k.Animated.View;
   return <A style={style}>{children}</A>;

@@ -54,11 +54,13 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
 
   return (
     <SafeAreaView style={styles.root} edges={["top", "bottom", "left"]}>
-      <DrawerRevealFx>
+      {/* Header sits outside the reveal fade: the tray's buttons stay at
+          full presence while the content below rises in. */}
       <View style={styles.header}>
         <Text style={styles.title}>landline</Text>
         <IconButton symbol="plus" fallback="＋" onPress={onSpawn} accent />
       </View>
+      <DrawerRevealFx>
       <LegendList
         data={sessions.data ?? []}
         keyExtractor={(s: SessionInfo) => s.id}
