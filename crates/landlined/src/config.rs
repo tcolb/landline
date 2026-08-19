@@ -106,6 +106,16 @@ pub struct Template {
     pub setup: Setup,
     #[serde(default)]
     pub env: HashMap<String, EnvValue>,
+    /// Chat mirror capability (docs/DESIGN.md § Session interfaces).
+    #[serde(default)]
+    pub chat: Option<TemplateChat>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateChat {
+    /// Transcript format/adapter: "claude" | "pi".
+    pub format: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

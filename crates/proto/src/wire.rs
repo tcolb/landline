@@ -19,6 +19,7 @@ pub const FEATURES: &[&str] = &[
     "templates",
     "template-list",
     "environment-list",
+    "chat",
     "stats",
     "input-seq",
 ];
@@ -62,6 +63,9 @@ pub struct SessionInfo {
     pub rows: u16,
     pub cols: u16,
     pub status: SessionStatus,
+    /// Whether a chat view is available (harness has a chat mirror).
+    #[serde(default)]
+    pub chat: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -102,6 +106,10 @@ pub enum AttachMode {
     /// VT-reconstruction snapshot of the current screen. For clients with
     /// their own terminal emulator — tmux-attach semantics.
     Bytes,
+    /// Semantic message log (chat view). Available when the session's
+    /// harness provides a chat mirror; a live projection of the same
+    /// process the terminal modes show.
+    Chat,
 }
 
 /// Client → daemon. `Input`/`Resize`/`Detach` are only valid after `Attach`.
@@ -188,6 +196,14 @@ pub enum Response {
     Event {
         event: SessionEvent,
     },
+    /// Full message log on chat attach; fully replaces client state.
+    ChatSnapshot {
+        items: Vec<ChatItem>,
+    },
+    /// One appended message; only in `chat` attach mode.
+    ChatItem {
+        item: ChatItem,
+    },
     /// Reply to `Stats`: counters and histograms, shape documented in
     /// docs/PROFILING.md. Schemaless on purpose — additive by nature.
     Stats {
@@ -239,6 +255,21 @@ pub struct TemplateParam {
     pub default: Option<String>,
     #[serde(default)]
     pub required: bool,
+}
+
+/// One entry in a session's chat view. `id` is monotonic per session;
+/// clients dedupe deltas against the snapshot with it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatItem {
+    pub id: u64,
+    /// "user" | "assistant" | "tool" | "system".
+    pub role: String,
+    /// "text" | "tool_use" | "tool_result" | "event".
+    pub kind: String,
+    pub text: String,
+    /// Tool name for tool_use items.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

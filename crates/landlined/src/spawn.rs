@@ -14,6 +14,8 @@ use crate::config::{self, EnvValue, EnvironmentSpec};
 
 pub struct ResolvedSpawn {
     pub name: Option<String>,
+    /// Chat mirror format, when the template declares one.
+    pub chat: Option<String>,
     /// The harness command, before any setup wrapping.
     pub cmd: Vec<String>,
     /// Final command to exec in the PTY (setup-wrapped if needed).
@@ -124,6 +126,10 @@ pub fn resolve(req: &SpawnRequest, session_id: &str) -> Result<ResolvedSpawn> {
 
     Ok(ResolvedSpawn {
         name: req.name.clone(),
+        chat: template
+            .as_ref()
+            .and_then(|t| t.chat.as_ref())
+            .map(|c| c.format.clone()),
         cmd,
         final_cmd,
         cwd,
@@ -162,6 +168,16 @@ fn resolve_workspace(
             let git_ref = interp(git_ref)?;
             let target =
                 worktrees_dir().join(format!("{session_id}-{}", git_ref.replace('/', "-")));
+            // Session ids restart per daemon boot; a stale worktree at the
+            // target is disposable by construction.
+            if target.exists() {
+                let _ = std::fs::remove_dir_all(&target);
+                let _ = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&base)
+                    .args(["worktree", "prune"])
+                    .output();
+            }
             let out = std::process::Command::new("git")
                 .arg("-C")
                 .arg(&base)
@@ -218,6 +234,14 @@ fn resolve_workspace(
             }
             let target =
                 worktrees_dir().join(format!("{session_id}-{}", git_ref.replace('/', "-")));
+            if target.exists() {
+                let _ = std::fs::remove_dir_all(&target);
+                let _ = std::process::Command::new("git")
+                    .arg("-C")
+                    .arg(&cache)
+                    .args(["worktree", "prune"])
+                    .output();
+            }
             let out = std::process::Command::new("git")
                 .arg("-C")
                 .arg(&cache)

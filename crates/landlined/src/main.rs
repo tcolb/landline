@@ -1,4 +1,5 @@
 mod attach;
+mod chat;
 mod config;
 mod daemon;
 mod environment;

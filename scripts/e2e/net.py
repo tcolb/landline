@@ -210,6 +210,50 @@ assert names[0] == "host", names
 print("environments list ok:", names)
 s5.close()
 
+# 5d. chat view: hybrid interface via transcript tailing (claude format)
+import shutil, tempfile
+chat_cwd = tempfile.mkdtemp(prefix="landline-chat-")
+slug = chat_cwd.replace("/", "-").replace(".", "-")
+chat_tdir = os.path.expanduser(f"~/.claude/projects/{slug}")
+ctpl = pathlib.Path(os.environ["LANDLINE_CONFIG_DIR"]) / "templates"
+script = (
+    'TDIR="$HOME/.claude/projects/$(pwd | tr /. --)"; '
+    'mkdir -p "$TDIR"; sleep 1; '
+    "echo '" + json.dumps({"type": "user", "message": {"role": "user", "content": "do the thing"}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 1; "
+    "echo '" + json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "text", "text": "done!"},
+        {"type": "tool_use", "name": "Bash", "input": {"command": "true"}}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 30"
+)
+(ctpl / "chatty.toml").write_text(
+    "[chat]\nformat = \"claude\"\n[harness]\ncmd = [\"sh\", \"-c\", " + json.dumps(script) + "]\n"
+)
+s6 = conn()
+rpc(s6, {"type": "spawn", "spawn": {"name": "chatty", "template": "chatty", "params": {},
+        "cmd": None, "cwd": chat_cwd, "env": None, "image": None, "rows": 24, "cols": 80}})
+sp6 = next(lines(s6))
+assert sp6["type"] == "spawned", sp6
+assert sp6["info"]["chat"] is True, sp6["info"]
+s6.close()
+a6 = conn()
+rpc(a6, {"type": "attach", "session": "chatty", "mode": "chat"})
+items = []
+for msg in lines(a6, timeout=15):
+    if msg["type"] == "chat_snapshot":
+        items.extend(msg["items"])
+    elif msg["type"] == "chat_item":
+        items.append(msg["item"])
+    if len(items) >= 3:
+        break
+kinds = [(i["role"], i["kind"]) for i in items]
+assert ("user", "text") in kinds and ("assistant", "text") in kinds and ("assistant", "tool_use") in kinds, kinds
+tool = next(i for i in items if i["kind"] == "tool_use")
+assert tool["tool"] == "Bash", tool
+print("chat view ok:", kinds)
+a6.close()
+s = conn(); rpc(s, {"type": "kill", "session": "chatty"}); next(lines(s)); s.close()
+shutil.rmtree(chat_tdir, ignore_errors=True)
+shutil.rmtree(chat_cwd, ignore_errors=True)
+
 # 6. watch: lifecycle events for a short-lived session, plus hooks
 wch = conn()
 rpc(wch, {"type": "watch"})

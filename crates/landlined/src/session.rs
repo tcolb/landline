@@ -19,7 +19,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossbeam_channel as xchan;
-use landline_proto::wire::{Frame, SessionInfo, SessionStatus};
+use landline_proto::wire::{ChatItem, Frame, SessionInfo, SessionStatus};
 use tokio::sync::broadcast;
 
 use crate::environment::{Environment, LaunchSpec, Launched};
@@ -34,6 +34,11 @@ const FRAME_INTERVAL: Duration = Duration::from_millis(16);
 pub enum Event {
     Frame(Frame),
     Exited { code: Option<i32> },
+}
+
+#[derive(Debug, Clone)]
+pub enum ChatEvent {
+    Item(ChatItem),
 }
 
 pub enum Ctl {
@@ -74,6 +79,26 @@ pub struct Session {
     pub stats: Arc<SessionStats>,
     /// Session spawn instant; epoch for `pending_input_times`.
     pub started: Instant,
+    /// Chat view state (hybrid interface): message log + delta stream.
+    pub chat_items: Mutex<Vec<ChatItem>>,
+    pub chat_events: broadcast::Sender<ChatEvent>,
+    pub chat_enabled: bool,
+    chat_next_id: AtomicU64,
+}
+
+impl Session {
+    /// Append a chat item and broadcast it (called by the chat tailer).
+    pub fn push_chat_item(&self, role: String, kind: String, text: String, tool: Option<String>) {
+        let item = ChatItem {
+            id: self.chat_next_id.fetch_add(1, Relaxed) + 1,
+            role,
+            kind,
+            text,
+            tool,
+        };
+        self.chat_items.lock().unwrap().push(item.clone());
+        let _ = self.chat_events.send(ChatEvent::Item(item));
+    }
 }
 
 impl Session {
@@ -81,6 +106,7 @@ impl Session {
         env: Box<dyn Environment>,
         info: SessionInfo,
         spec: &LaunchSpec,
+        chat_format: Option<String>,
     ) -> Result<Arc<Self>> {
         let Launched {
             master,
@@ -93,6 +119,7 @@ impl Session {
         let (ctl_tx, ctl_rx) = xchan::unbounded::<Ctl>();
         let (events, _) = broadcast::channel::<Event>(256);
         let (bytes, _) = broadcast::channel::<Vec<u8>>(256);
+        let (chat_events, _) = broadcast::channel::<ChatEvent>(256);
 
         let mut reader = master.try_clone_reader()?;
         let mut writer = master.take_writer()?;
@@ -111,7 +138,19 @@ impl Session {
             pending_input_times: Mutex::new(std::collections::VecDeque::new()),
             stats: Arc::new(SessionStats::default()),
             started: Instant::now(),
+            chat_items: Mutex::new(Vec::new()),
+            chat_events,
+            chat_enabled: chat_format.is_some(),
+            chat_next_id: AtomicU64::new(0),
         });
+
+        // Chat tailer: follow the harness's live session file (hybrid
+        // interface) for the session's lifetime.
+        if let Some(format) = chat_format {
+            let session = session.clone();
+            let cwd = spec.cwd.clone();
+            std::thread::spawn(move || crate::chat::run_tailer(session, format, cwd));
+        }
 
         // Reader: PTY output -> VT thread, teed to bytes-mode subscribers.
         {

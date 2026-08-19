@@ -47,7 +47,7 @@ rest of the connection. Open one connection per concern.
 | `{"type": "spawn", "spawn": SpawnRequest}` | `spawned` or `error` |
 | `{"type": "ls"}` | `sessions` |
 | `{"type": "kill", "session": ID_OR_NAME}` | `ok` or `error` |
-| `{"type": "attach", "session": ID_OR_NAME, "mode": "frames" \| "bytes"}` | → attached state |
+| `{"type": "attach", "session": ID_OR_NAME, "mode": "frames" \| "bytes" \| "chat"}` | → attached state |
 | `{"type": "watch"}` | `ok`, then → watching state |
 | `{"type": "stats", "session": ID_OR_NAME}` | `stats` (counters/histograms; see docs/PROFILING.md) |
 | `{"type": "templates", "cwd": PATH?}` | `templates` — spawnable templates (name, description, params with defaults/required, environment and harness summaries). `cwd` scopes in project-local `.landline/templates/`, which shadow user-level ones. Templates are the primary spawn surface (agent-first design). |
@@ -117,7 +117,26 @@ with a fresh reconstruction snapshot.
 ← {"type": "bytes", "data": "G1sxOzFIG1sybUhlbGxv…"}
 ```
 
-### Client → server while attached (both modes)
+### Attached state (`mode: "chat"`)
+
+The semantic message log of a hybrid session (DESIGN.md § Session
+interfaces) — available when `SessionInfo.chat` is true; attaching a
+non-chat session yields an error. On attach the server sends the full
+log, then one message per appended item. Item `id` is monotonic per
+session; on a lag-resync the server sends a fresh `chat_snapshot`, which
+fully replaces client state.
+
+```json
+← {"type": "chat_snapshot", "items": [ChatItem, …]}
+← {"type": "chat_item", "item": {"id": 7, "role": "assistant",
+     "kind": "tool_use", "tool": "Bash", "text": "{\"command\":\"ls\"}"}}
+```
+
+`role`: user | assistant | tool | system. `kind`: text | tool_use |
+tool_result | event. Input/resize/detach behave exactly as in the other
+modes — chat input types into the same PTY the terminal views show.
+
+### Client → server while attached (all modes)
 
 ```json
 → {"type": "input", "data": "aGVsbG8=", "seq": 42}  // base64 keyboard bytes

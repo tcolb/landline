@@ -23,7 +23,7 @@ use tokio::sync::{broadcast, mpsc};
 
 use crate::config::Hooks;
 use crate::environment::LaunchSpec;
-use crate::session::{Ctl, Event, Session};
+use crate::session::{ChatEvent, Ctl, Event, Session};
 use crate::spawn::resolve;
 
 pub struct Registry {
@@ -277,6 +277,7 @@ pub async fn serve_client(mut client: Client, registry: Arc<Registry>) -> Result
                         return match mode {
                             AttachMode::Frames => attached_frames(client, &s).await,
                             AttachMode::Bytes => attached_bytes(client, &s).await,
+                            AttachMode::Chat => attached_chat(client, &s).await,
                         };
                     }
                     None => {
@@ -418,6 +419,7 @@ fn do_spawn(registry: &Arc<Registry>, req: &SpawnRequest) -> Response {
         rows: req.rows,
         cols: req.cols,
         status: SessionStatus::Running,
+        chat: resolved.chat.is_some(),
     };
     let spec = LaunchSpec {
         cmd: resolved.final_cmd,
@@ -426,7 +428,7 @@ fn do_spawn(registry: &Arc<Registry>, req: &SpawnRequest) -> Response {
         rows: req.rows,
         cols: req.cols,
     };
-    match Session::spawn(environment, info.clone(), &spec) {
+    match Session::spawn(environment, info.clone(), &spec, resolved.chat.clone()) {
         Ok(session) => {
             registry.insert(session.clone());
             registry.emit(SessionEventKind::Created, info.clone());
@@ -541,6 +543,68 @@ async fn attached_input(
         }
     }
     Ok(true)
+}
+
+async fn attached_chat(mut client: Client, session: &Arc<Session>) -> Result<()> {
+    if !session.chat_enabled {
+        client
+            .send(&Response::Error {
+                message: "session has no chat view".into(),
+            })
+            .await?;
+        return Ok(());
+    }
+    // Subscribe before snapshotting so nothing falls in between; dedupe
+    // deltas already covered by the snapshot via item id.
+    let mut chat = session.chat_events.subscribe();
+    let mut events = session.events.subscribe();
+    let (snapshot, mut last_id) = {
+        let items = session.chat_items.lock().unwrap();
+        (items.clone(), items.last().map(|i| i.id).unwrap_or(0))
+    };
+    client
+        .send(&Response::ChatSnapshot { items: snapshot })
+        .await?;
+    if let SessionStatus::Exited { code } = session.status() {
+        client.send(&Response::Exited { code }).await?;
+        return Ok(());
+    }
+    loop {
+        tokio::select! {
+            ev = chat.recv() => match ev {
+                Ok(ChatEvent::Item(item)) => {
+                    if item.id > last_id {
+                        last_id = item.id;
+                        client.send(&Response::ChatItem { item }).await?;
+                    }
+                }
+                // Lagged: resync with a fresh snapshot, mirroring frames mode.
+                Err(broadcast::error::RecvError::Lagged(_)) => {
+                    let (snapshot, newest) = {
+                        let items = session.chat_items.lock().unwrap();
+                        (items.clone(), items.last().map(|i| i.id).unwrap_or(0))
+                    };
+                    last_id = newest;
+                    client.send(&Response::ChatSnapshot { items: snapshot }).await?;
+                }
+                Err(_) => return Ok(()),
+            },
+            ev = events.recv() => match ev {
+                Ok(Event::Exited { code }) => {
+                    client.send(&Response::Exited { code }).await?;
+                    return Ok(());
+                }
+                Ok(_) => continue,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return Ok(()),
+            },
+            line = client.rx.recv() => {
+                if !attached_input(&client, session, line).await? {
+                    return Ok(());
+                }
+            }
+        }
+    }
 }
 
 async fn attached_frames(mut client: Client, session: &Arc<Session>) -> Result<()> {

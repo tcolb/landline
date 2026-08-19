@@ -293,6 +293,33 @@ not a terminal multiplexer with agents bolted on. Practically:
   the same template identity: an agent spawning a helper names a template,
   not a shell command.
 
+### Session interfaces: terminal, chat, hybrid
+
+The interface axis of a session (environment × harness × interface) has
+three values, and **harness capability decides which are available — none
+is guaranteed universal**:
+
+- **terminal** — the PTY TUI, served as frames/bytes. Universal: any
+  program that runs in a terminal.
+- **chat** — a chat-native session: the harness runs in its structured
+  mode (ACP, RPC, stream-JSON) and the daemon maintains a message log
+  instead of (not alongside) a TUI. Breadth path for headless agents.
+- **hybrid** — terminal AND chat as two live projections of one process.
+  Possible exactly when the harness emits a semantic mirror of its
+  interactive session; verified for Claude Code (live transcript JSONL
+  under `~/.claude/projects/<cwd-slug>/`) and documented for pi
+  (`~/.pi/agent/sessions/…`, documented entry types). Chat input types
+  into the PTY; switching views is instant because nothing switches —
+  both attach modes are live simultaneously.
+
+Templates/harnesses declare capability (`[chat] format = "claude"`);
+clients render the Terminal | Chat toggle only when the session has it.
+The daemon's chat log is the semantic sibling of the VT screen: same
+architecture (server-side state, snapshot on attach, deltas after,
+resync by snapshot), different state type. Spawn-time env sanitation is
+mandatory — inherited harness markers (e.g. nested-session flags) can
+silently disable the mirrors.
+
 ### Repo-centric workspaces
 
 "Spin up claude for a repo" is the primary flow; a fixed directory in a
