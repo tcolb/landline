@@ -530,6 +530,17 @@ export function Terminal({ cfg, session, onBack }: Props) {
     };
   }, [cfg, session, applyFrame]);
 
+  // Keepalive: an empty input every 300ms while attached. Keeps the phone
+  // Wi-Fi radio out of power-save, which otherwise costs the first
+  // keystroke after an idle gap a ~100ms wake-up (visible as pre_ms spikes
+  // in the slow-frame trace). The daemon ignores empty inputs entirely.
+  useEffect(() => {
+    const id = setInterval(() => {
+      handle.current?.send(inputMessage(""));
+    }, 300);
+    return () => clearInterval(id);
+  }, []);
+
   // Live-refresh the stats panel while it is open.
   useEffect(() => {
     if (!showStats) return;

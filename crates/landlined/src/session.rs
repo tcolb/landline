@@ -138,6 +138,12 @@ impl Session {
             let session = session.clone();
             std::thread::spawn(move || {
                 while let Ok((data, seq, received)) = input_rx.recv() {
+                    // Empty input = client keepalive (keeps the phone radio
+                    // out of power-save); nothing to write, don't pollute
+                    // input stats.
+                    if data.is_empty() && seq.is_none() {
+                        continue;
+                    }
                     if writer.write_all(&data).is_err() {
                         break;
                     }

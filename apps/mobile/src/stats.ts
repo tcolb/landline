@@ -96,7 +96,7 @@ export interface SlowEvent {
   msgs_in_tick: number;
 }
 
-const SLOW_THRESHOLD_MS = 100;
+const SLOW_THRESHOLD_MS = 60;
 const SLOW_KEEP = 20;
 
 export const stats = {
