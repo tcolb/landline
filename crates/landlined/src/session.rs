@@ -13,8 +13,9 @@
 //! clients by construction.
 
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use crossbeam_channel as xchan;
@@ -23,6 +24,7 @@ use tokio::sync::broadcast;
 
 use crate::environment::{Environment, LaunchSpec, Launched};
 use crate::screen::{GhosttyScreen, Screen};
+use crate::stats::SessionStats;
 
 const SCROLLBACK_LINES: usize = 10_000;
 /// Diff coalescing tick: bound both latency and frame rate for clients.
@@ -47,9 +49,12 @@ pub enum Ctl {
     },
 }
 
+/// One queued input write: bytes, optional client seq, receive time.
+pub type InputMsg = (Vec<u8>, Option<u64>, Instant);
+
 pub struct Session {
     pub info: Mutex<SessionInfo>,
-    pub input_tx: xchan::Sender<Vec<u8>>,
+    pub input_tx: xchan::Sender<InputMsg>,
     pub ctl_tx: xchan::Sender<Ctl>,
     pub events: broadcast::Sender<Event>,
     /// Raw PTY output tee for bytes-mode clients.
@@ -59,6 +64,14 @@ pub struct Session {
     /// Last screen of an exited session, servable postmortem.
     pub final_frame: Mutex<Option<Frame>>,
     pub final_vt: Mutex<Option<Vec<u8>>>,
+    /// Highest client input seq written to the PTY (0 = none yet); stamped
+    /// onto frames as `ack` for client-side latency correlation.
+    pub last_input_seq: AtomicU64,
+    /// When that input was written, µs since session spawn.
+    pub last_input_at_us: AtomicU64,
+    pub stats: Arc<SessionStats>,
+    /// Session spawn instant; epoch for `last_input_at_us`.
+    pub started: Instant,
 }
 
 impl Session {
@@ -74,7 +87,7 @@ impl Session {
         } = env.launch(spec)?;
 
         let (out_tx, out_rx) = xchan::bounded::<Vec<u8>>(256);
-        let (input_tx, input_rx) = xchan::bounded::<Vec<u8>>(256);
+        let (input_tx, input_rx) = xchan::bounded::<InputMsg>(256);
         let (ctl_tx, ctl_rx) = xchan::unbounded::<Ctl>();
         let (events, _) = broadcast::channel::<Event>(256);
         let (bytes, _) = broadcast::channel::<Vec<u8>>(256);
@@ -92,33 +105,56 @@ impl Session {
             environment: env,
             final_frame: Mutex::new(None),
             final_vt: Mutex::new(None),
+            last_input_seq: AtomicU64::new(0),
+            last_input_at_us: AtomicU64::new(0),
+            stats: Arc::new(SessionStats::default()),
+            started: Instant::now(),
         });
 
         // Reader: PTY output -> VT thread, teed to bytes-mode subscribers.
-        std::thread::spawn(move || {
-            let mut buf = [0u8; 16 * 1024];
-            loop {
-                match reader.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(n) => {
-                        let chunk = buf[..n].to_vec();
-                        let _ = bytes.send(chunk.clone()); // no subscribers is fine
-                        if out_tx.send(chunk).is_err() {
-                            break;
+        {
+            let stats = session.stats.clone();
+            std::thread::spawn(move || {
+                let mut buf = [0u8; 16 * 1024];
+                loop {
+                    match reader.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            stats.pty_bytes_in.fetch_add(n as u64, Relaxed);
+                            let chunk = buf[..n].to_vec();
+                            let _ = bytes.send(chunk.clone()); // no subscribers is fine
+                            if out_tx.send(chunk).is_err() {
+                                break;
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
+        }
 
-        // Writer: client input -> PTY.
-        std::thread::spawn(move || {
-            while let Ok(data) = input_rx.recv() {
-                if writer.write_all(&data).is_err() {
-                    break;
+        // Writer: client input -> PTY. Records receive→write latency and
+        // publishes the seq for frame acks.
+        {
+            let session = session.clone();
+            std::thread::spawn(move || {
+                while let Ok((data, seq, received)) = input_rx.recv() {
+                    if writer.write_all(&data).is_err() {
+                        break;
+                    }
+                    session.stats.inputs.fetch_add(1, Relaxed);
+                    session
+                        .stats
+                        .input_latency
+                        .record_duration(received.elapsed());
+                    if let Some(seq) = seq {
+                        session
+                            .last_input_at_us
+                            .store(session.started.elapsed().as_micros() as u64, Relaxed);
+                        session.last_input_seq.fetch_max(seq, Relaxed);
+                    }
                 }
-            }
-        });
+            });
+        }
 
         // Wait: child exit -> VT thread (which owns status + broadcast).
         {
@@ -170,13 +206,46 @@ fn vt_loop(
 ) {
     let mut pending = false; // wrote bytes since last diff?
     let mut last_emit = std::time::Instant::now() - FRAME_INTERVAL;
+    // Stamp the highest PTY-written input seq onto outgoing frames so
+    // clients can correlate input→effect on their own clock.
+    // Track which seq we've already timed so input→frame latency records
+    // once, on the first frame that acks each input.
+    let mut last_timed_seq: u64 = 0;
+    let mut stamp_ack = |frame: &mut Frame| {
+        let seq = session.last_input_seq.load(Relaxed);
+        if seq > 0 {
+            match frame {
+                Frame::Snapshot { ack, .. } | Frame::Diff { ack, .. } => *ack = Some(seq),
+            }
+            if seq > last_timed_seq {
+                last_timed_seq = seq;
+                let written_us = session.last_input_at_us.load(Relaxed);
+                let now_us = session.started.elapsed().as_micros() as u64;
+                session
+                    .stats
+                    .input_to_frame
+                    .record(now_us.saturating_sub(written_us));
+            }
+        }
+    };
     // Adaptive tick: after a quiet period the first diff goes out at once,
     // so interactive echo never waits out the coalescing interval; only
     // continuous output is coalesced on the tick (see the responsiveness
     // budget in docs/DESIGN.md).
     macro_rules! emit_now {
-        () => {
-            if let Some(frame) = screen.diff() {
+        ($counter:ident) => {
+            let t = Instant::now();
+            let frame = screen.diff();
+            session.stats.vt_diff.record_duration(t.elapsed());
+            if let Some(mut frame) = frame {
+                match &frame {
+                    Frame::Diff { lines, .. } | Frame::Snapshot { lines, .. } => {
+                        session.stats.rows_per_diff.record(lines.len() as u64);
+                    }
+                }
+                stamp_ack(&mut frame);
+                session.stats.frames.fetch_add(1, Relaxed);
+                session.stats.$counter.fetch_add(1, Relaxed);
                 let _ = session.events.send(Event::Frame(frame));
             }
             last_emit = std::time::Instant::now();
@@ -187,13 +256,15 @@ fn vt_loop(
         xchan::select! {
             recv(out_rx) -> msg => match msg {
                 Ok(data) => {
+                    let t = Instant::now();
                     screen.write(&data);
                     // Drain whatever else is queued before diffing.
                     while let Ok(more) = out_rx.try_recv() {
                         screen.write(&more);
                     }
+                    session.stats.vt_write.record_duration(t.elapsed());
                     if last_emit.elapsed() >= FRAME_INTERVAL {
-                        emit_now!();
+                        emit_now!(frames_immediate);
                     } else {
                         pending = true;
                     }
@@ -202,7 +273,9 @@ fn vt_loop(
             },
             recv(ctl_rx) -> msg => match msg {
                 Ok(Ctl::Snapshot(reply)) => {
-                    let _ = reply.send(screen.snapshot());
+                    let mut frame = screen.snapshot();
+                    stamp_ack(&mut frame);
+                    let _ = reply.send(frame);
                 }
                 Ok(Ctl::VtSnapshot(reply)) => {
                     let _ = reply.send(screen.vt_dump());
@@ -218,7 +291,7 @@ fn vt_loop(
                         info.cols = cols;
                     }
                     // Resize is interactive; repaint without waiting.
-                    emit_now!();
+                    emit_now!(frames_immediate);
                 }
                 Ok(Ctl::ChildExited { code }) => {
                     // Flush any final output that raced the exit.
@@ -241,7 +314,7 @@ fn vt_loop(
             },
             default(FRAME_INTERVAL) => {
                 if pending {
-                    emit_now!();
+                    emit_now!(frames_coalesced);
                 }
             },
         }

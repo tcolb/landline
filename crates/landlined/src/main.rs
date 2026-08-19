@@ -6,6 +6,7 @@ mod paths;
 mod screen;
 mod session;
 mod spawn;
+mod stats;
 mod web;
 
 use std::io::{BufRead, BufReader, Write};
@@ -66,6 +67,8 @@ enum Command {
     },
     /// List sessions.
     Ls,
+    /// Print a session's pipeline statistics (docs/PROFILING.md).
+    Stats { session: String },
     /// Kill a session by id or name.
     Kill { session: String },
     /// Attach to a session by id or name. Detach with Ctrl-\.
@@ -154,6 +157,16 @@ fn main() -> Result<()> {
                             s.cmd.join(" ")
                         );
                     }
+                    Ok(())
+                }
+                other => fail(other),
+            }
+        }
+        Command::Stats { session } => {
+            let mut stream = connect_or_start(&socket)?;
+            match roundtrip(&mut stream, &Request::Stats { session })? {
+                Response::Stats { stats } => {
+                    println!("{}", serde_json::to_string_pretty(&stats)?);
                     Ok(())
                 }
                 other => fail(other),

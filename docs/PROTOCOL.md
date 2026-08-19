@@ -49,6 +49,7 @@ rest of the connection. Open one connection per concern.
 | `{"type": "kill", "session": ID_OR_NAME}` | `ok` or `error` |
 | `{"type": "attach", "session": ID_OR_NAME, "mode": "frames" \| "bytes"}` | → attached state |
 | `{"type": "watch"}` | `ok`, then → watching state |
+| `{"type": "stats", "session": ID_OR_NAME}` | `stats` (counters/histograms; see docs/PROFILING.md) |
 
 `SpawnRequest`:
 
@@ -117,10 +118,17 @@ with a fresh reconstruction snapshot.
 ### Client → server while attached (both modes)
 
 ```json
-→ {"type": "input", "data": "aGVsbG8="}        // base64 keyboard bytes
-→ {"type": "resize", "rows": 50, "cols": 120}  // last writer wins
-→ {"type": "detach"}                           // server closes gracefully
+→ {"type": "input", "data": "aGVsbG8=", "seq": 42}  // base64 keyboard bytes
+→ {"type": "resize", "rows": 50, "cols": 120}       // last writer wins
+→ {"type": "detach"}                                // server closes gracefully
 ```
+
+`seq` is an optional client-monotonic counter. Frames carry `ack`: the
+highest `seq` whose bytes had been written to the session PTY when the
+frame was generated. Clients measure input→effect latency on their own
+clock as `t_painted(first frame with ack >= s) − t_sent(s)`. The
+correlation is an upper bound (a frame generated after the write may
+predate the input's visible effect), mosh-style; see docs/PROFILING.md.
 
 When the session's child exits, the server sends any final output, then:
 

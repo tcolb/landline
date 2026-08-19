@@ -9,6 +9,7 @@
 import {
   Canvas,
   FontStyle,
+  Group,
   matchFont,
   Picture,
   SkFont,
@@ -28,6 +29,7 @@ import {
   View,
 } from "react-native";
 import { AttachHandle, attachFrames, ConnectionConfig } from "../client";
+import { stats } from "../stats";
 import {
   CellData,
   Cursor,
@@ -42,6 +44,9 @@ import {
 const BG = "#0d1117";
 const FG = "#c9d1d9";
 const FONT_SIZE = 12;
+/** Zero-width-space deletion cushion. 64 chars ≈ 4s of held auto-repeat
+ * between input remounts (the only reset RN reliably applies). */
+const SENTINEL = "\u200b".repeat(64);
 
 // Font creation touches Skia's native module, so it must not run at module
 // load (a throw there black-screens the whole app before any UI mounts).
@@ -128,7 +133,10 @@ const FALLBACK_FAMILIES: string[] = Platform.select({
 const glyphCache = new Map<number, SkFont | null>(); // null = main font is fine
 function fontForGlyph(t: string): SkFont | null {
   const cp = t.codePointAt(0) ?? 0;
-  if (cp < 0x2500) return null;
+  // Fast path: ASCII/Latin/punctuation only. Symbol blocks start early
+  // (U+23F5 ⏵ is Misc Technical) — everything above goes through the
+  // cached coverage check.
+  if (cp < 0x2000) return null;
   const cached = glyphCache.get(cp);
   if (cached !== undefined) return cached;
   const { font } = getFontInfo();
@@ -142,6 +150,20 @@ function fontForGlyph(t: string): SkFont | null {
       if (candidate.getGlyphIDs(t, 1)[0] !== 0) {
         result = candidate;
         break;
+      }
+    }
+    // Last resort: scan every installed family for coverage. One-time per
+    // codepoint (cached), so the cost is bounded.
+    if (!result) {
+      const n = mgr.countFamilies();
+      for (let i = 0; i < n; i++) {
+        const typeface = mgr.matchFamilyStyle(mgr.getFamilyName(i), FontStyle.Normal);
+        if (!typeface) continue;
+        const candidate = Skia.Font(typeface, FONT_SIZE);
+        if (candidate.getGlyphIDs(t, 1)[0] !== 0) {
+          result = candidate;
+          break;
+        }
       }
     }
   }
@@ -287,7 +309,24 @@ export function Terminal({ cfg, session, onBack }: Props) {
   const grid = useRef<CellData[][]>([]);
   const cursor = useRef<Cursor>({ x: 0, y: 0, visible: false });
   const handle = useRef<AttachHandle | null>(null);
-  const inputSentAt = useRef<number | null>(null);
+  // seq/ack correlation (docs/PROFILING.md): every input carries a seq;
+  // frames ack the highest seq written to the PTY; latency resolves when
+  // the acking frame has been composed — one clock, honest under load.
+  const seqCounter = useRef(0);
+  const pendingInputs = useRef(new Map<number, number>());
+  const lastAck = useRef(0);
+  /** Arrival metadata of the frame that most recently raised lastAck. */
+  const ackMeta = useRef<{ arrivedAt: number; kind: string; rows: number } | null>(null);
+  const msgsSinceCompose = useRef(0);
+  const [showStats, setShowStats] = useState(false);
+  const [, forceTick] = useState(0);
+  /** Shadow of the hidden input's native contents (uncontrolled field). */
+  const lastField = useRef(SENTINEL);
+  /** Pre-reset contents, kept until an event confirms the reset landed. */
+  const preReset = useRef<string | null>(null);
+  /** Bumped to remount the input: setNativeProps({text}) is a silent no-op
+   * on the new architecture, so remount is the only dependable refill. */
+  const [inputEpoch, setInputEpoch] = useState(0);
   const inputRef = useRef<TextInput>(null);
   const ctrlRef = useRef(false);
   ctrlRef.current = ctrl;
@@ -296,12 +335,23 @@ export function Terminal({ cfg, session, onBack }: Props) {
   // final picture just composes cached rows + cursor. This is the
   // dirty-row-only repaint from the responsiveness budget.
   const rowPics = useRef<(SkPicture | null)[]>([]);
+  // Rows changed since the last compose. Frames can arrive much faster
+  // than the display refreshes (held-key redraw storms); recording only
+  // each dirty row's FINAL state once per animation frame keeps the JS
+  // thread ahead of the message queue instead of drowning in it.
+  const dirtyRows = useRef<Set<number>>(new Set());
   const composeScheduled = useRef(false);
 
   const compose = useCallback(() => {
+    const t0 = performance.now();
     const { cellW: CELL_W, cellH: CELL_H } = getFontInfo();
     const rows = rowPics.current.length;
     if (rows === 0) return;
+    for (const y of dirtyRows.current) {
+      if (y < grid.current.length) rowPics.current[y] = recordRow(grid.current[y]);
+    }
+    dirtyRows.current.clear();
+    const tRecorded = performance.now();
     let cols = 0;
     for (const r of grid.current) cols = Math.max(cols, r.length);
     const rec = Skia.PictureRecorder();
@@ -323,6 +373,32 @@ export function Terminal({ cfg, session, onBack }: Props) {
       );
     }
     setPicture(rec.finishRecordingAsPicture());
+    const now = performance.now();
+    stats.record.add(tRecorded - t0);
+    stats.compose.add(now - tRecorded);
+    const msgsThisTick = msgsSinceCompose.current;
+    stats.msgsPerTick.add(msgsThisTick);
+    msgsSinceCompose.current = 0;
+    // Resolve e2e latency for every input the composed state acks, split
+    // into pre-arrival (network + server) and post-arrival (client).
+    const meta = ackMeta.current;
+    for (const [seq, sentAt] of pendingInputs.current) {
+      if (seq <= lastAck.current) {
+        const ms = now - sentAt;
+        const arrivedAt = meta ? meta.arrivedAt : now;
+        stats.addResolved({
+          seq,
+          e2e_ms: Math.round(ms * 10) / 10,
+          pre_ms: Math.round(Math.max(0, arrivedAt - sentAt) * 10) / 10,
+          post_ms: Math.round(Math.max(0, now - arrivedAt) * 10) / 10,
+          frame_kind: meta?.kind ?? "?",
+          frame_rows: meta?.rows ?? 0,
+          msgs_in_tick: msgsThisTick,
+        });
+        setEchoMs(Math.round(ms));
+        pendingInputs.current.delete(seq);
+      }
+    }
   }, []);
 
   // Coalesce: frames can arrive faster than the display refreshes; compose
@@ -342,30 +418,45 @@ export function Terminal({ cfg, session, onBack }: Props) {
 
   const applyFrame = useCallback(
     (frame: Frame) => {
-      if (inputSentAt.current !== null) {
-        setEchoMs(Math.round(Date.now() - inputSentAt.current));
-        inputSentAt.current = null;
+      const t0 = performance.now();
+      msgsSinceCompose.current++;
+      stats.rowsPerFrame.add(frame.lines.length);
+      if (frame.ack !== undefined) {
+        // The daemon's seq space is session-global and survives re-attach;
+        // adopt it, or our restarted counter sits below the current ack and
+        // every input resolves instantly against stale state.
+        if (frame.ack > seqCounter.current && pendingInputs.current.size === 0) {
+          seqCounter.current = frame.ack;
+          lastAck.current = frame.ack;
+        }
+        if (frame.ack > lastAck.current) {
+          lastAck.current = frame.ack;
+          ackMeta.current = {
+            arrivedAt: performance.now(),
+            kind: frame.kind,
+            rows: frame.lines.length,
+          };
+        }
       }
-      try {
-        if (frame.kind === "snapshot") {
-          grid.current = [];
-          rowPics.current = [];
-          for (let y = 0; y < frame.rows; y++) {
-            grid.current.push([]);
-            rowPics.current.push(null);
-          }
+      if (frame.kind === "snapshot") {
+        grid.current = [];
+        rowPics.current = [];
+        dirtyRows.current.clear();
+        for (let y = 0; y < frame.rows; y++) {
+          grid.current.push([]);
+          rowPics.current.push(null);
+          dirtyRows.current.add(y);
         }
-        for (const row of frame.lines) {
-          if (row.y < grid.current.length) {
-            grid.current[row.y] = row.cells;
-            rowPics.current[row.y] = recordRow(row.cells);
-          }
+      }
+      for (const row of frame.lines) {
+        if (row.y < grid.current.length) {
+          grid.current[row.y] = row.cells;
+          dirtyRows.current.add(row.y);
         }
-      } catch (e: any) {
-        setStatus(`render error: ${String(e?.message ?? e)}`);
       }
       cursor.current = frame.cursor;
       if (frame.mouse !== undefined) mouseMode.current = frame.mouse;
+      stats.apply.add(performance.now() - t0);
       scheduleCompose();
     },
     [scheduleCompose],
@@ -439,6 +530,13 @@ export function Terminal({ cfg, session, onBack }: Props) {
     };
   }, [cfg, session, applyFrame]);
 
+  // Live-refresh the stats panel while it is open.
+  useEffect(() => {
+    if (!showStats) return;
+    const id = setInterval(() => forceTick((n) => n + 1), 500);
+    return () => clearInterval(id);
+  }, [showStats]);
+
   // Fit the PTY to the canvas whenever layout changes. The 2px margin
   // absorbs fractional cell-width rounding so the last column can never
   // fall off the screen edge.
@@ -457,14 +555,25 @@ export function Terminal({ cfg, session, onBack }: Props) {
       if (code >= 64 && code < 96) text = String.fromCharCode(code & 0x1f);
       setCtrl(false);
     }
-    inputSentAt.current = Date.now();
-    handle.current?.send(inputMessage(text));
+    const seq = ++seqCounter.current;
+    pendingInputs.current.set(seq, performance.now());
+    // Bound the map in case acks never come (exited session).
+    if (pendingInputs.current.size > 256) {
+      const oldest = pendingInputs.current.keys().next().value;
+      if (oldest !== undefined) pendingInputs.current.delete(oldest);
+    }
+    handle.current?.send(inputMessage(text, seq));
   };
 
-  const key = (label: string, seq: string, opts?: { sticky?: boolean }) => (
+  const key = (
+    label: string,
+    seq: string,
+    opts?: { sticky?: boolean; longPressSeq?: string },
+  ) => (
     <Pressable
       key={label}
       onPress={() => (opts?.sticky ? setCtrl((v) => !v) : sendText(seq))}
+      onLongPress={opts?.longPressSeq ? () => sendText(opts.longPressSeq!) : undefined}
       style={[styles.key, opts?.sticky && ctrl ? styles.keyActive : null]}
     >
       <Text style={styles.keyText}>{label}</Text>
@@ -473,6 +582,8 @@ export function Terminal({ cfg, session, onBack }: Props) {
 
   const cols = grid.current[0]?.length ?? 0;
   const rows = grid.current.length;
+  // Center the grid: split the sub-cell remainder evenly left and right.
+  const xOff = Math.max(0, (size.w - cols * getFontInfo().cellW) / 2);
 
   return (
     <KeyboardAvoidingView
@@ -483,12 +594,26 @@ export function Terminal({ cfg, session, onBack }: Props) {
         <Pressable onPress={onBack} style={styles.key}>
           <Text style={styles.keyText}>‹ back</Text>
         </Pressable>
-        <Text style={styles.overlay}>
-          {session} · {cols}×{rows} · {getFontInfo().family}
-          {echoMs !== null ? ` · echo ${echoMs}ms` : ""}
-          {status ? ` · ${status}` : ""}
-        </Text>
+        <Pressable style={styles.overlayWrap} onPress={() => setShowStats((v) => !v)}>
+          <Text style={styles.overlay}>
+            {session} · {cols}×{rows} · {getFontInfo().family}
+            {echoMs !== null ? ` · e2e ${echoMs}ms` : ""}
+            {status ? ` · ${status}` : ""}
+          </Text>
+        </Pressable>
       </View>
+      {showStats && (
+        <View style={styles.statsPanel}>
+          {Object.entries(stats.snapshot()).map(([k, v]) => (
+            <Text key={k} style={styles.statsLine}>
+              {k}: {typeof v === "object" ? JSON.stringify(v) : String(v)}
+            </Text>
+          ))}
+          <Pressable onPress={() => stats.dump()} style={styles.key}>
+            <Text style={styles.keyText}>dump to console</Text>
+          </Pressable>
+        </View>
+      )}
       <View
         style={styles.canvasWrap}
         {...pan.panHandlers}
@@ -496,7 +621,11 @@ export function Terminal({ cfg, session, onBack }: Props) {
           setSize({ w: e.nativeEvent.layout.width, h: e.nativeEvent.layout.height })
         }
       >
-        <Canvas style={styles.canvas}>{picture && <Picture picture={picture} />}</Canvas>
+        <Canvas style={styles.canvas}>
+          <Group transform={[{ translateX: xOff }]}>
+            {picture && <Picture picture={picture} />}
+          </Group>
+        </Canvas>
       </View>
       <View style={styles.keys}>
         {key("esc", "\x1b")}
@@ -507,7 +636,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
         {key("↓", "\x1b[B")}
         {key("↑", "\x1b[A")}
         {key("→", "\x1b[C")}
-        {key("⌫", "\x7f")}
+        {key("⌫", "\x7f", { longPressSeq: "\x17" /* Ctrl-W: delete word */ })}
         <Pressable
           style={styles.key}
           onPress={() => {
@@ -521,22 +650,68 @@ export function Terminal({ cfg, session, onBack }: Props) {
         </Pressable>
       </View>
       <TextInput
+        key={inputEpoch}
         ref={inputRef}
         style={styles.hiddenInput}
-        // Sentinel pattern: the field always holds one zero-width space, so
-        // backspace produces onChangeText("") and typed text arrives as
-        // sentinel+chars. Avoids onKeyPress, which iOS fires unreliably
-        // (duplicate/spurious Backspace events).
-        value={"​"}
+        // Sentinel-cushion pattern, uncontrolled: the field starts with 16
+        // zero-width spaces and we diff each event against the PREVIOUS
+        // contents (a controlled reset lands asynchronously, so diffing
+        // against a fresh cushion double-counts under key auto-repeat).
+        // Deleted chars → that many backspaces, added chars → typed text.
+        // The cushion is replenished imperatively only when it runs low,
+        // updating our shadow copy at the same time. No onKeyPress
+        // (unreliable on iOS), no assumptions about reset timing.
+        defaultValue={SENTINEL}
         onChangeText={(t) => {
-          if (t === "") {
-            sendText("\x7f");
-            return;
+          // A programmatic reset races in-flight keyboard events: an event
+          // computed from the PRE-reset text diffed against the fresh
+          // cushion re-sends the whole typed history. Keep both baselines
+          // and diff against whichever explains this event most cheaply.
+          const bases =
+            preReset.current !== null
+              ? [lastField.current, preReset.current]
+              : [lastField.current];
+          let best = bases[0];
+          let bestP = 0;
+          let bestCost = Number.POSITIVE_INFINITY;
+          for (const b of bases) {
+            let p = 0;
+            while (p < b.length && p < t.length && b[p] === t[p]) p++;
+            const cost = b.length - p + (t.length - p);
+            if (cost < bestCost) {
+              bestCost = cost;
+              best = b;
+              bestP = p;
+            }
           }
-          const typed = t.startsWith("​") ? t.slice(1) : t;
-          if (typed !== "") sendText(typed);
+          const removed = best.length - bestP;
+          const added = t.slice(bestP).replaceAll("​", "");
+          lastField.current = t;
+          if (preReset.current !== null && t.startsWith(SENTINEL)) {
+            preReset.current = null; // reset observed; stale window over
+          }
+          let out = "";
+          if (removed > 0) out += "\x7f".repeat(removed);
+          out += added;
+          if (out !== "") sendText(out);
+          // Replenish when the cushion runs low (deletions) or the field
+          // grows very long (typing); remember the pre-reset text so the
+          // stale-event window stays diffable.
+          let zw = 0;
+          while (zw < t.length && t[zw] === "​") zw++;
+          if (zw < 24 || t.length > 512) {
+            preReset.current = t;
+            lastField.current = SENTINEL;
+            setInputEpoch((n) => n + 1);
+          }
         }}
-        onSubmitEditing={() => sendText("\r")}
+        onSubmitEditing={() => {
+          sendText("\r");
+          // Enter is a natural quiescent point; start the field fresh.
+          preReset.current = lastField.current;
+          lastField.current = SENTINEL;
+          setInputEpoch((n) => n + 1);
+        }}
         submitBehavior="submit"
         autoCapitalize="none"
         autoCorrect={false}
@@ -557,7 +732,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 6,
   },
-  overlay: { color: "#8b949e", fontSize: 12, flexShrink: 1 },
+  overlay: { color: "#8b949e", fontSize: 12 },
+  overlayWrap: { flexShrink: 1 },
+  statsPanel: {
+    position: "absolute",
+    top: 40,
+    left: 8,
+    right: 8,
+    zIndex: 10,
+    backgroundColor: "rgba(13,17,23,0.94)",
+    borderColor: "#30363d",
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    gap: 3,
+  },
+  statsLine: { color: "#8b949e", fontFamily: "monospace", fontSize: 10 },
   canvasWrap: { flex: 1 },
   canvas: { flex: 1 },
   keys: {

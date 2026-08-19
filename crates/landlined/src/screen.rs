@@ -173,6 +173,7 @@ impl Screen for GhosttyScreen {
                     lines,
                     cursor,
                     mouse,
+                    ack: None,
                 }
             }
             Err(_) => Frame::Snapshot {
@@ -185,6 +186,7 @@ impl Screen for GhosttyScreen {
                     visible: false,
                 },
                 mouse,
+                ack: None,
             },
         }
     }
@@ -231,6 +233,7 @@ impl Screen for GhosttyScreen {
                     lines: Vec::new(),
                     cursor,
                     mouse,
+                    ack: None,
                 })
             }
             Dirty::Partial => {
@@ -245,12 +248,14 @@ impl Screen for GhosttyScreen {
                         lines,
                         cursor,
                         mouse,
+                        ack: None,
                     })
                 } else {
                     Some(Frame::Diff {
                         lines,
                         cursor,
                         mouse,
+                        ack: None,
                     })
                 }
             }
@@ -267,6 +272,7 @@ impl Screen for GhosttyScreen {
                     lines,
                     cursor,
                     mouse,
+                    ack: None,
                 })
             }
         }

@@ -287,6 +287,17 @@ pub async fn serve_client(mut client: Client, registry: Arc<Registry>) -> Result
                     }
                 }
             }
+            Request::Stats { session } => {
+                let resp = match registry.get(&session) {
+                    Some(s) => Response::Stats {
+                        stats: s.stats.to_json(),
+                    },
+                    None => Response::Error {
+                        message: format!("no session {session}"),
+                    },
+                };
+                client.send(&resp).await?;
+            }
             Request::Input { .. } | Request::Resize { .. } | Request::Detach => {
                 client
                     .send(&Response::Error {
@@ -424,8 +435,10 @@ async fn attached_input(
 ) -> Result<bool> {
     let Some(line) = line else { return Ok(false) };
     match serde_json::from_str::<Request>(&line) {
-        Ok(Request::Input { data }) => {
-            let _ = session.input_tx.send(data);
+        Ok(Request::Input { data, seq }) => {
+            let _ = session
+                .input_tx
+                .send((data, seq, std::time::Instant::now()));
         }
         Ok(Request::Resize { rows, cols }) => {
             let _ = session.ctl_tx.send(Ctl::Resize { rows, cols });
@@ -470,13 +483,20 @@ async fn attached_frames(mut client: Client, session: &Arc<Session>) -> Result<(
     loop {
         tokio::select! {
             ev = events.recv() => match ev {
-                Ok(Event::Frame(frame)) => client.send(&Response::Frame { frame }).await?,
+                Ok(Event::Frame(frame)) => {
+                    let line = serde_json::to_string(&Response::Frame { frame })?;
+                    session.stats.frame_bytes.record(line.len() as u64);
+                    if client.tx.send(line).await.is_err() {
+                        return Ok(());
+                    }
+                }
                 Ok(Event::Exited { code }) => {
                     client.send(&Response::Exited { code }).await?;
                     return Ok(());
                 }
                 // Lagged: we dropped frames; resync with a fresh snapshot.
                 Err(broadcast::error::RecvError::Lagged(_)) => {
+                    session.stats.lagged_resyncs.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Some(frame) = live_snapshot(session).await? {
                         client.send(&Response::Frame { frame }).await?;
                     }

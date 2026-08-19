@@ -64,6 +64,7 @@ pub fn run(socket: &Path, session: &str, mode: AttachMode) -> Result<()> {
                             &mut stream,
                             &Request::Input {
                                 data: buf[..n].to_vec(),
+                                seq: None,
                             },
                         )
                         .is_err()

@@ -38,8 +38,10 @@ export type Frame =
       cursor: Cursor;
       /** Mouse tracking active in the session (swipe → wheel codes). */
       mouse?: boolean;
+      /** Highest input seq written to the PTY before this frame. */
+      ack?: number;
     }
-  | { kind: "diff"; lines: RowData[]; cursor: Cursor; mouse?: boolean };
+  | { kind: "diff"; lines: RowData[]; cursor: Cursor; mouse?: boolean; ack?: number };
 
 export type SessionStatus =
   | { state: "running" }
@@ -80,9 +82,10 @@ export type Request =
   | { type: "kill"; session: string }
   | { type: "attach"; session: string; mode: "frames" | "bytes" }
   | { type: "watch" }
-  | { type: "input"; data: string } // base64
+  | { type: "input"; data: string; seq?: number } // base64
   | { type: "resize"; rows: number; cols: number }
-  | { type: "detach" };
+  | { type: "detach" }
+  | { type: "stats"; session: string };
 
 export type Response =
   | { type: "ok" }
@@ -93,6 +96,7 @@ export type Response =
   | { type: "frame"; frame: Frame }
   | { type: "bytes"; data: string } // base64
   | { type: "event"; event: SessionEvent }
+  | { type: "stats"; stats: Record<string, unknown> }
   | { type: "exited"; code: number | null };
 
 // Base64 helpers, dependency-free (Hermes has atob/btoa, but UTF-8 needs
@@ -131,6 +135,6 @@ export function utf8ToBytes(s: string): Uint8Array {
   return Uint8Array.from(out);
 }
 
-export function inputMessage(text: string): Request {
-  return { type: "input", data: bytesToB64(utf8ToBytes(text)) };
+export function inputMessage(text: string, seq?: number): Request {
+  return { type: "input", data: bytesToB64(utf8ToBytes(text)), seq };
 }

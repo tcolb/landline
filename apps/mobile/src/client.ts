@@ -12,6 +12,7 @@ import {
   SessionEvent,
   SpawnRequest,
 } from "./proto";
+import { stats } from "./stats";
 
 export interface ConnectionConfig {
   /** host:port of the daemon's --ws listener */
@@ -118,9 +119,15 @@ export async function attachFrames(
 ): Promise<AttachHandle> {
   const ws = await openSocket(cfg);
   ws.onmessage = (ev) => {
-    const resp = JSON.parse(String(ev.data)) as Response;
-    if (resp.type === "frame") on.frame(resp.frame);
-    else if (resp.type === "exited") on.exited(resp.code);
+    const raw = String(ev.data);
+    const t0 = performance.now();
+    const resp = JSON.parse(raw) as Response;
+    stats.parse.add(performance.now() - t0);
+    stats.bytesRate.add(raw.length);
+    if (resp.type === "frame") {
+      stats.framesRate.add();
+      on.frame(resp.frame);
+    } else if (resp.type === "exited") on.exited(resp.code);
     else if (resp.type === "error") on.error(resp.message);
   };
   ws.onclose = () => on.closed();

@@ -154,6 +154,31 @@ assert b"LIVE_42" in seen, seen[-200:]
 print("bytes live stream ok (input -> raw output)")
 a.close()
 
+# 5b. seq/ack correlation + stats (docs/PROFILING.md)
+a = conn()
+rpc(a, {"type": "attach", "session": "net2", "mode": "frames"})
+first = next(lines(a))
+assert first["type"] == "frame", first
+rpc(a, {"type": "input", "data": b64(b"echo SEQ_$((2+3))\r"), "seq": 7})
+acked = None
+for msg in lines(a, timeout=5):
+    if msg["type"] == "frame" and msg["frame"].get("ack") is not None:
+        acked = msg["frame"]["ack"]
+        break
+assert acked is not None and acked >= 7, acked
+print("seq/ack ok: frame acked seq", acked)
+a.close()
+s = conn()
+rpc(s, {"type": "stats", "session": "net2"})
+st = next(lines(s))
+assert st["type"] == "stats", st
+d = st["stats"]
+assert d["inputs"] >= 1 and d["frames"] >= 1, d
+assert d["input_latency_us"]["count"] >= 1, d
+assert d["vt_diff_us"]["count"] >= 1, d
+print("stats ok:", {k: d[k] for k in ("inputs", "frames", "frames_immediate", "frames_coalesced")})
+s.close()
+
 # 6. watch: lifecycle events for a short-lived session, plus hooks
 wch = conn()
 rpc(wch, {"type": "watch"})

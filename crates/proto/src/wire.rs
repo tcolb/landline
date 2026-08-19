@@ -12,7 +12,14 @@ use serde::{Deserialize, Serialize};
 pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Feature names reported in [`Response::Hello`].
-pub const FEATURES: &[&str] = &["frames", "bytes", "watch", "templates"];
+pub const FEATURES: &[&str] = &[
+    "frames",
+    "bytes",
+    "watch",
+    "templates",
+    "stats",
+    "input-seq",
+];
 
 /// Base64 (standard alphabet, padded) serde adapter for binary payloads.
 pub mod b64 {
@@ -121,12 +128,20 @@ pub enum Request {
     Input {
         #[serde(with = "b64")]
         data: Vec<u8>,
+        /// Client-monotonic sequence number; echoed back as frame `ack`
+        /// so clients can measure true input→effect latency on one clock.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        seq: Option<u64>,
     },
     Resize {
         rows: u16,
         cols: u16,
     },
     Detach,
+    /// Per-session pipeline statistics (docs/PROFILING.md).
+    Stats {
+        session: String,
+    },
 }
 
 /// Daemon → client.
@@ -158,6 +173,11 @@ pub enum Response {
     /// Session lifecycle event; only after `Watch`.
     Event {
         event: SessionEvent,
+    },
+    /// Reply to `Stats`: counters and histograms, shape documented in
+    /// docs/PROFILING.md. Schemaless on purpose — additive by nature.
+    Stats {
+        stats: serde_json::Value,
     },
     Exited {
         code: Option<i32>,
@@ -218,11 +238,17 @@ pub enum Frame {
         cursor: Cursor,
         #[serde(default)]
         mouse: bool,
+        /// Highest input `seq` written to the PTY before this frame was
+        /// generated (an upper-bound correlation, mosh-style).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ack: Option<u64>,
     },
     Diff {
         lines: Vec<RowData>,
         cursor: Cursor,
         #[serde(default)]
         mouse: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ack: Option<u64>,
     },
 }
