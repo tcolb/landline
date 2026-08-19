@@ -65,12 +65,16 @@ function getFontInfo(): FontInfo {
       ios: ["Menlo", "Courier New", "Courier"],
       default: ["monospace", "Droid Sans Mono", "Courier New"],
     })!;
+    // Cell width must be the glyph ADVANCE, not ink bounds: text runs are
+    // positioned by Skia's real advances, so a smaller assumed cell makes
+    // every run drift right and pushes the last columns off-screen.
+    const advance = (f: SkFont, ch: string) => f.getGlyphWidths(f.getGlyphIDs(ch, 1))[0] ?? 0;
     let family = candidates[candidates.length - 1];
     let font = matchFont({ fontFamily: family, fontSize: FONT_SIZE });
     for (const fam of candidates) {
       const f = matchFont({ fontFamily: fam, fontSize: FONT_SIZE });
-      const wi = f.getTextWidth("i");
-      if (wi > 0 && Math.abs(wi - f.getTextWidth("W")) < 0.01) {
+      const wi = advance(f, "i");
+      if (wi > 0 && Math.abs(wi - advance(f, "W")) < 0.01) {
         family = fam;
         font = f;
         break;
@@ -82,7 +86,7 @@ function getFontInfo(): FontInfo {
       font,
       boldFont,
       family,
-      cellW: font.getTextWidth("0"),
+      cellW: advance(font, "0"),
       cellH: Math.ceil(-metrics.ascent + metrics.descent),
       baseline: Math.ceil(-metrics.ascent),
     };
