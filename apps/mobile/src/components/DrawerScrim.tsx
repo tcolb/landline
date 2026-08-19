@@ -123,3 +123,25 @@ function Scrim() {
 export function DrawerScrim() {
   return kit ? <Scrim /> : null;
 }
+
+function BarFx({ children }: { children: React.ReactNode }) {
+  const k = kit!;
+  const progress = k.useDrawerProgress();
+  // Depth treatment for the in-card bar: recede along z (scale down) and
+  // fade as the card is pulled away, return as it docks.
+  const style = k.useAnimatedStyle(() => {
+    const p = progress.value ?? 0;
+    return {
+      opacity: 1 - p * 0.65,
+      transform: [{ scale: 1 - p * 0.1 }],
+    };
+  });
+  const A = k.Animated.View;
+  return <A style={style}>{children}</A>;
+}
+
+/** Wraps the in-card top bar with the drawer depth/fade treatment; a
+ * plain passthrough when the drawer stack is unavailable. */
+export function DrawerBarFx({ children }: { children: React.ReactNode }) {
+  return kit ? <BarFx>{children}</BarFx> : <>{children}</>;
+}

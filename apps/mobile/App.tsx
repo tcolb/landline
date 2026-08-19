@@ -52,7 +52,9 @@ function DrawerMain({
     <D.Navigator
       screenOptions={{
         headerShown: false,
-        drawerType: "slide",
+        // "back": the sidebar sits static underneath and the session view
+        // slides over it as a card, rather than both panes sliding together.
+        drawerType: "back",
         // Scrim lives INSIDE the scene (DrawerScrim) so it clips to the
         // card's corner radius; the built-in overlay bleeds past it.
         overlayColor: "transparent",

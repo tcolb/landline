@@ -8,7 +8,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
 import { ChatView } from "../components/ChatView";
-import { DrawerScrim } from "../components/DrawerScrim";
+import { DrawerBarFx, DrawerScrim } from "../components/DrawerScrim";
 import { IconButton } from "../components/IconButton";
 import { Terminal } from "../components/Terminal";
 import { useSelection } from "../selection";
@@ -55,7 +55,9 @@ export function SessionHost({ cfg, openDrawer }: Props) {
   const activeView = selection?.chat && view === "chat" ? "chat" : "terminal";
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <TopBar openDrawer={openDrawer} />
+      <DrawerBarFx>
+        <TopBar openDrawer={openDrawer} />
+      </DrawerBarFx>
       {selection === null ? (
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>No session selected</Text>
