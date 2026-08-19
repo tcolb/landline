@@ -64,6 +64,52 @@ export function IconButton({ symbol, fallback, onPress, size = BAR_BUTTON_SIZE, 
   );
 }
 
+interface PillProps {
+  label: string;
+  symbol: string;
+  onPress(): void;
+}
+
+/** Labeled Liquid Glass capsule button (e.g. "+ New Session"). */
+export function GlassPillButton({ label, symbol, onPress }: PillProps) {
+  if (SwiftUI !== null && SwiftUIModifiers !== null) {
+    const m = SwiftUIModifiers;
+    return (
+      <SwiftUI.Host style={{ width: 180, height: 52 }} colorScheme="dark">
+        <SwiftUI.Button
+          onPress={onPress}
+          label={label}
+          systemImage={symbol as never}
+          modifiers={[
+            m.buttonStyle("glassProminent"),
+            m.buttonBorderShape("capsule"),
+            m.tint("#238636"),
+            m.controlSize("large"),
+          ]}
+        />
+      </SwiftUI.Host>
+    );
+  }
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [pillStyles.pill, pressed && styles.pressed]}
+    >
+      <Text style={pillStyles.text}>+ {label}</Text>
+    </Pressable>
+  );
+}
+
+const pillStyles = StyleSheet.create({
+  pill: {
+    backgroundColor: "#238636",
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+  },
+  text: { color: "#ffffff", fontWeight: "600", fontSize: 15 },
+});
+
 const styles = StyleSheet.create({
   btn: {
     backgroundColor: "#1e1e1e",

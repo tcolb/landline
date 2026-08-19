@@ -8,7 +8,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
 import { DrawerRevealFx } from "../components/DrawerScrim";
-import { IconButton } from "../components/IconButton";
+import { GlassPillButton } from "../components/IconButton";
 import { SessionInfo } from "../proto";
 import { killSession, useSessions } from "../sessions";
 
@@ -54,13 +54,10 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
 
   return (
     <SafeAreaView style={styles.root} edges={["top", "bottom", "left"]}>
-      {/* Header sits outside the reveal fade: the tray's buttons stay at
-          full presence while the content below rises in. */}
+      <DrawerRevealFx>
       <View style={styles.header}>
         <Text style={styles.title}>landline</Text>
-        <IconButton symbol="plus" fallback="＋" onPress={onSpawn} accent />
       </View>
-      <DrawerRevealFx>
       <LegendList
         data={sessions.data ?? []}
         keyExtractor={(s: SessionInfo) => s.id}
@@ -76,6 +73,9 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
       <Pressable onPress={onDisconnect} style={styles.footer}>
         <Text style={styles.dim}>disconnect</Text>
       </Pressable>
+      <View style={styles.fab}>
+        <GlassPillButton label="New Session" symbol="plus" onPress={onSpawn} />
+      </View>
       </DrawerRevealFx>
     </SafeAreaView>
   );
@@ -83,6 +83,7 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000000" },
+  fab: { position: "absolute", right: 14, bottom: 48 },
   header: {
     flexDirection: "row",
     alignItems: "center",

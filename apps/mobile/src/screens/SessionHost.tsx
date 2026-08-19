@@ -8,14 +8,14 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
 import { ChatView } from "../components/ChatView";
-import { DrawerBarFade, DrawerScrim } from "../components/DrawerScrim";
+import { DrawerScrim } from "../components/DrawerScrim";
 import { IconButton } from "../components/IconButton";
 import { Terminal } from "../components/Terminal";
 import { useSelection } from "../selection";
 
 /** Bump on every UI change batch; shows in the dev bar so a stale bundle
  * is immediately visible on-device. */
-const JS_REV = "r23";
+const JS_REV = "r24";
 
 interface Props {
   cfg: ConnectionConfig;
@@ -62,9 +62,7 @@ export function SessionHost({ cfg, openDrawer }: Props) {
   const activeView = selection?.chat && view === "chat" ? "chat" : "terminal";
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      <DrawerBarFade>
-        <TopBar openDrawer={openDrawer} />
-      </DrawerBarFade>
+      <TopBar openDrawer={openDrawer} />
       {selection === null ? (
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyTitle}>No session selected</Text>
