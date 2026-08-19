@@ -17,7 +17,11 @@ interface Props {
   accent?: boolean;
 }
 
-export function IconButton({ symbol, fallback, onPress, size = 34, accent }: Props) {
+// The UINavigationBar standard: 44pt control, 17pt symbol.
+const BAR_BUTTON_SIZE = 44;
+const BAR_SYMBOL_SIZE = 17;
+
+export function IconButton({ symbol, fallback, onPress, size = BAR_BUTTON_SIZE, accent }: Props) {
   if (SwiftUI !== null && SwiftUIModifiers !== null) {
     const m = SwiftUIModifiers;
     const modifiers = [
@@ -30,7 +34,7 @@ export function IconButton({ symbol, fallback, onPress, size = 34, accent }: Pro
         <SwiftUI.Button onPress={onPress} modifiers={modifiers}>
           <SwiftUI.Image
             systemName={symbol as never}
-            size={size * 0.44}
+            size={BAR_SYMBOL_SIZE}
             color={accent ? "#ffffff" : "#e6edf3"}
           />
         </SwiftUI.Button>

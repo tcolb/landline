@@ -41,7 +41,7 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
         )}
       </View>
       {/* Balance the menu button so the center stays centered. */}
-      <View style={{ width: 34 }} />
+      <View style={{ width: 44 }} />
     </View>
   );
 }
