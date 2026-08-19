@@ -19,6 +19,45 @@ import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { ChatItem, inputMessage } from "../proto";
 import { useSessions } from "../sessions";
 
+/** Frame-synced keyboard avoidance (reanimated tracks the real keyboard
+ * transition on the UI thread); KAV fallback on old binaries. */
+const kbKit = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const r = require("react-native-reanimated");
+    if (!r.useAnimatedKeyboard || !r.default) return null;
+    return {
+      Animated: r.default,
+      useAnimatedKeyboard: r.useAnimatedKeyboard,
+      useAnimatedStyle: r.useAnimatedStyle,
+    };
+  } catch {
+    return null;
+  }
+})();
+
+function KbSynced({ children }: { children: React.ReactNode }) {
+  const k = kbKit!;
+  const kb = k.useAnimatedKeyboard();
+  const style = k.useAnimatedStyle(() => ({
+    paddingBottom: kb.height.value,
+  }));
+  const A = k.Animated.View;
+  return <A style={[styles.root, style]}>{children}</A>;
+}
+
+function KbAvoiding({ children }: { children: React.ReactNode }) {
+  if (kbKit !== null) return <KbSynced>{children}</KbSynced>;
+  return (
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      {children}
+    </KeyboardAvoidingView>
+  );
+}
+
 interface Props {
   cfg: ConnectionConfig;
   session: string;
@@ -113,10 +152,7 @@ export function ChatView({ cfg, session }: Props) {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
+    <KbAvoiding>
       {status !== "" && <Text style={styles.status}>{status}</Text>}
       <LegendList
         ref={list}
@@ -181,7 +217,7 @@ export function ChatView({ cfg, session }: Props) {
           </View>
         </View>
       </View>
-    </KeyboardAvoidingView>
+    </KbAvoiding>
   );
 }
 
@@ -231,11 +267,9 @@ const styles = StyleSheet.create({
   bubbleWrap: {
     flex: 1,
     minHeight: 80,
-    borderRadius: 26,
-    overflow: "hidden",
     paddingBottom: 8,
   },
-  bubbleFallback: { backgroundColor: "#141414" },
+  bubbleFallback: { backgroundColor: "#141414", borderRadius: 26, overflow: "hidden" },
   input: {
     color: "#c9d1d9",
     backgroundColor: "transparent",
