@@ -1,6 +1,18 @@
-// Chat view of a hybrid session: the daemon's semantic message log
-// rendered as bubbles. Same session, same process as the terminal view —
-// input sent here types into the PTY.
+// Chat view of a hybrid session: the daemon's semantic message log.
+// Same session, same process as the terminal view — input sent here types
+// into the PTY.
+//
+// Composer architecture (learned the hard way):
+// - The composer is ONE SwiftUI subtree (glass + field + send) hosted with
+//   matchContents, so its size comes from SwiftUI itself. No RN overlay on
+//   a separately-sized glass rectangle, no onLayout feedback loops.
+// - It follows the keyboard via an animated BOTTOM offset, never a
+//   transform: Liquid Glass is a backdrop material and CALayer transforms
+//   invalidate its sampling (the "bubble disappears" failure). A position
+//   change relayouts only this small subtree, so it stays glued to the
+//   keyboard's top edge without touching the list.
+// - The list is a static absolute-fill; keyboard transitions change only
+//   its content padding (one relayout per transition, never per frame).
 
 import { LegendList, LegendListRef } from "@legendapp/list/react-native";
 import React, { useEffect, useRef, useState } from "react";
@@ -15,14 +27,17 @@ import {
   View,
 } from "react-native";
 import { AttachHandle, attachChat, ConnectionConfig } from "../client";
-import { IconButton } from "./IconButton";
 import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { ChatItem, inputMessage } from "../proto";
 import { useSessions } from "../sessions";
 
-/** Frame-synced keyboard avoidance (reanimated tracks the real keyboard
- * transition on the UI thread); KAV fallback on old binaries. */
-const kbKit = (() => {
+interface Props {
+  cfg: ConnectionConfig;
+  session: string;
+}
+
+/** Reanimated, guarded (null on binaries without it). */
+const anim = (() => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const r = require("react-native-reanimated");
@@ -37,40 +52,89 @@ const kbKit = (() => {
   }
 })();
 
-/** Lifts the composer with a pure transform tracking the keyboard's top
- * edge on the UI thread — no per-frame layout, so the motion is glued to
- * the keyboard and the bubble's internals never reflow. */
-function ComposerLift({ children }: { children: React.ReactNode }) {
-  const k = kbKit!;
-  const kb = k.useAnimatedKeyboard();
-  const style = k.useAnimatedStyle(() => ({
-    transform: [{ translateY: -kb.height.value }],
-  }));
-  const A = k.Animated.View;
-  return <A style={style}>{children}</A>;
-}
+const nativeComposer = SwiftUI !== null && SwiftUIModifiers !== null && anim !== null;
 
-function ComposerLiftMaybe({ children }: { children: React.ReactNode }) {
-  if (kbKit !== null) return <ComposerLift>{children}</ComposerLift>;
-  return <>{children}</>;
-}
-
-function KbAvoiding({ children }: { children: React.ReactNode }) {
-  // With reanimated the lift is handled per-component; plain container here.
-  if (kbKit !== null) return <View style={styles.root}>{children}</View>;
+/** The whole composer as a single SwiftUI subtree: glass panel containing
+ * the multiline field and the send circle. Sizes itself (matchContents);
+ * grows with text. */
+function NativeComposer({
+  agentName,
+  onSend,
+}: {
+  agentName: string;
+  onSend(text: string): void;
+}) {
+  const S = SwiftUI!;
+  const m = SwiftUIModifiers!;
+  const draft = useRef("");
+  const field = useRef<import("@expo/ui/swift-ui").TextFieldRef>(null);
+  const send = () => {
+    const text = draft.current.trim();
+    if (text === "") return;
+    onSend(text);
+    draft.current = "";
+    field.current?.clear();
+  };
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
-    >
-      {children}
-    </KeyboardAvoidingView>
+    <S.Host style={styles.nativeHost} colorScheme="dark" matchContents={{ vertical: true }}>
+      <S.VStack
+        spacing={2}
+        modifiers={[
+          m.padding({ top: 6, bottom: 6, leading: 4, trailing: 6 }),
+          m.glassEffect({
+            glass: { variant: "regular" },
+            shape: "roundedRectangle",
+            cornerRadius: 26,
+          }),
+        ]}
+      >
+        <S.TextField
+          ref={field}
+          axis="vertical"
+          placeholder={`Ask ${agentName}`}
+          onTextChange={(t) => {
+            draft.current = t;
+          }}
+          modifiers={[
+            m.font({ size: 17 }),
+            m.lineLimit(5),
+            m.padding({ leading: 12, trailing: 8, top: 6 }),
+            m.textFieldStyle("plain"),
+          ]}
+        />
+        <S.HStack>
+          <S.Spacer />
+          <S.Button
+            onPress={send}
+            modifiers={[
+              m.buttonStyle("glassProminent"),
+              m.buttonBorderShape("circle"),
+              m.tint("#238636"),
+            ]}
+          >
+            <S.Image
+              systemName="arrow.up"
+              size={14}
+              color="#ffffff"
+              modifiers={[m.frame({ width: 18, height: 18 })]}
+            />
+          </S.Button>
+        </S.HStack>
+      </S.VStack>
+    </S.Host>
   );
 }
 
-interface Props {
-  cfg: ConnectionConfig;
-  session: string;
+/** Positions the composer above the keyboard by animating its bottom
+ * offset on the UI thread (position, never transform — see header). */
+function KeyboardDocked({ children }: { children: React.ReactNode }) {
+  const a = anim!;
+  const kb = a.useAnimatedKeyboard();
+  const style = a.useAnimatedStyle(() => ({
+    bottom: kb.height.value,
+  }));
+  const A = a.Animated.View;
+  return <A style={[styles.dock, style]}>{children}</A>;
 }
 
 export function ChatView({ cfg, session }: Props) {
@@ -81,28 +145,11 @@ export function ChatView({ cfg, session }: Props) {
   const agentBase = agentCmd.split("/").pop() ?? "";
   const agentName =
     agentBase === "" ? "agent" : agentBase.charAt(0).toUpperCase() + agentBase.slice(1);
-  // List clearance under the lifted composer: single relayout per keyboard
-  // transition (not per-frame), content just scrolls up behind it.
-  const [kbClearance, setKbClearance] = useState(0);
-  // Measured bubble size for the glass layer: an explicit host frame keeps
-  // SwiftUI's drawing exactly bubble-sized (viewport measurement proposes
-  // the whole screen, and hosting views do not clip).
-  const [bubbleSize, setBubbleSize] = useState({ w: 0, h: 0 });
-  useEffect(() => {
-    if (Platform.OS !== "ios" || kbKit === null) return;
-    const show = Keyboard.addListener("keyboardWillShow", (e) => {
-      setKbClearance(e.endCoordinates.height);
-      requestAnimationFrame(() => list.current?.scrollToEnd({ animated: true }));
-    });
-    const hide = Keyboard.addListener("keyboardWillHide", () => setKbClearance(0));
-    return () => {
-      show.remove();
-      hide.remove();
-    };
-  }, []);
+
   const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState("connecting…");
   const [draft, setDraft] = useState("");
+  const [kbClearance, setKbClearance] = useState(0);
   const handle = useRef<AttachHandle | null>(null);
   const list = useRef<LegendListRef>(null);
 
@@ -140,12 +187,32 @@ export function ChatView({ cfg, session }: Props) {
     }
   }, [items.length]);
 
-  const sendDraft = () => {
-    const text = draft.trim();
-    if (text === "" || handle.current === null) return;
+  // One relayout per keyboard transition: pad the list clear of the lifted
+  // composer.
+  useEffect(() => {
+    if (Platform.OS !== "ios" || !nativeComposer) return;
+    const show = Keyboard.addListener("keyboardWillShow", (e) => {
+      setKbClearance(e.endCoordinates.height);
+      requestAnimationFrame(() => list.current?.scrollToEnd({ animated: true }));
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", () => setKbClearance(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
+
+  const sendText = (text: string) => {
+    if (handle.current === null) return;
     // Types into the same PTY the terminal shows: text, then Enter.
     handle.current.send(inputMessage(text));
     setTimeout(() => handle.current?.send(inputMessage("\r")), 120);
+  };
+
+  const sendDraft = () => {
+    const text = draft.trim();
+    if (text === "") return;
+    sendText(text);
     setDraft("");
   };
 
@@ -185,85 +252,59 @@ export function ChatView({ cfg, session }: Props) {
     );
   };
 
-  return (
-    <KbAvoiding>
-      {status !== "" && <Text style={styles.status}>{status}</Text>}
-      <LegendList
-        ref={list}
-        data={items}
-        keyExtractor={(i: ChatItem) => String(i.id)}
-        renderItem={renderItem}
-        estimatedItemSize={64}
-        recycleItems
-        contentContainerStyle={{ paddingBottom: kbClearance }}
-        ListEmptyComponent={
-          <Text style={styles.empty}>
-            {status === "" ? "no messages yet — say something" : ""}
-          </Text>
-        }
-      />
-      <ComposerLiftMaybe>
-      <View style={styles.inputRow}>
-        <View
-          style={[styles.bubbleWrap, SwiftUI === null && styles.bubbleFallback]}
-          onLayout={(e) =>
-            setBubbleSize({
-              w: e.nativeEvent.layout.width,
-              h: e.nativeEvent.layout.height,
-            })
-          }
-        >
-          {SwiftUI !== null && SwiftUIModifiers !== null && bubbleSize.w > 0 && (
-            // Liquid Glass panel behind the transparent field, sized to the
-            // measured bubble.
-            <SwiftUI.Host
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                width: bubbleSize.w,
-                height: bubbleSize.h,
-              }}
-              colorScheme="dark"
-              pointerEvents="none"
-            >
-              <SwiftUI.HStack
-                modifiers={[
-                  SwiftUIModifiers.frame({ maxWidth: 9999, maxHeight: 9999 }),
-                  SwiftUIModifiers.glassEffect({
-                    glass: { variant: "regular" },
-                    shape: "roundedRectangle",
-                    cornerRadius: 26,
-                  }),
-                ]}
-              >
-                <SwiftUI.Spacer />
-              </SwiftUI.HStack>
-            </SwiftUI.Host>
-          )}
-          <TextInput
-            style={styles.input}
-            value={draft}
-            onChangeText={setDraft}
-            placeholder={`Ask ${agentName}`}
-            placeholderTextColor="#8b949e"
-            multiline
-            autoCapitalize="none"
-            autoCorrect
-          />
-          <View style={styles.sendRow}>
-            {SwiftUI !== null ? (
-              <IconButton symbol="arrow.up" fallback="↑" onPress={sendDraft} accent size={34} />
-            ) : (
-              <Pressable style={styles.sendBtn} onPress={sendDraft}>
-                <Text style={styles.sendText}>↑</Text>
-              </Pressable>
-            )}
-          </View>
-        </View>
+  const messageList = (
+    <LegendList
+      ref={list}
+      data={items}
+      keyExtractor={(i: ChatItem) => String(i.id)}
+      renderItem={renderItem}
+      estimatedItemSize={64}
+      recycleItems
+      contentContainerStyle={{ paddingBottom: kbClearance + 120 }}
+      ListEmptyComponent={
+        <Text style={styles.empty}>
+          {status === "" ? "no messages yet — say something" : ""}
+        </Text>
+      }
+    />
+  );
+
+  if (nativeComposer) {
+    return (
+      <View style={styles.root}>
+        <View style={StyleSheet.absoluteFill}>{messageList}</View>
+        {status !== "" && <Text style={styles.status}>{status}</Text>}
+        <KeyboardDocked>
+          <NativeComposer agentName={agentName} onSend={sendText} />
+        </KeyboardDocked>
       </View>
-      </ComposerLiftMaybe>
-    </KbAvoiding>
+    );
+  }
+
+  // Fallback (Android / pre-module binaries): plain RN composer.
+  return (
+    <KeyboardAvoidingView
+      style={styles.root}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      {status !== "" && <Text style={styles.status}>{status}</Text>}
+      {messageList}
+      <View style={styles.fallbackRow}>
+        <TextInput
+          style={styles.fallbackInput}
+          value={draft}
+          onChangeText={setDraft}
+          placeholder={`Ask ${agentName}`}
+          placeholderTextColor="#8b949e"
+          multiline
+          autoCapitalize="none"
+          autoCorrect
+        />
+        <Pressable style={styles.sendBtn} onPress={sendDraft}>
+          <Text style={styles.sendText}>↑</Text>
+        </Pressable>
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -299,34 +340,34 @@ const styles = StyleSheet.create({
   },
   toolTitle: { color: "#8b949e", fontSize: 12, fontWeight: "600", marginBottom: 2 },
   toolText: { color: "#8b949e", fontFamily: "monospace", fontSize: 11 },
-  // Floating composer: no bar background — the glass capsule and glass
-  // send circle hover over the conversation.
-  inputRow: {
+  // Composer dock: absolute strip pinned above the keyboard by an animated
+  // bottom offset.
+  dock: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    bottom: 0,
+    paddingBottom: 10,
+  },
+  nativeHost: { width: "100%" },
+  // Fallback composer.
+  fallbackRow: {
     flexDirection: "row",
     alignItems: "flex-end",
     paddingHorizontal: 12,
     paddingVertical: 10,
     gap: 8,
-    backgroundColor: "transparent",
   },
-  // Full-width floating bubble: input row on top, send circle bottom-right.
-  bubbleWrap: {
+  fallbackInput: {
     flex: 1,
-    minHeight: 80,
-    paddingBottom: 8,
-  },
-  bubbleFallback: { backgroundColor: "#141414", borderRadius: 26, overflow: "hidden" },
-  input: {
     color: "#c9d1d9",
-    backgroundColor: "transparent",
+    backgroundColor: "#141414",
+    borderRadius: 22,
     paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 6,
+    paddingVertical: 12,
     maxHeight: 120,
     fontSize: 17,
-    lineHeight: 22,
   },
-  sendRow: { flexDirection: "row", justifyContent: "flex-end", paddingRight: 8 },
   sendBtn: {
     width: 36,
     height: 36,
