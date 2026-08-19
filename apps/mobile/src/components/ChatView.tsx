@@ -71,7 +71,7 @@ const SEND_DIAMETER = 36;
 const SEND_GAP = BUBBLE_RADIUS - SEND_DIAMETER / 2;
 const INPUT_LINE = 24;
 const INPUT_MAX_LINES = 5;
-const INPUT_PAD_TOP = 8;
+const INPUT_PAD_TOP = 12;
 const INPUT_PAD_BOTTOM = SEND_DIAMETER + SEND_GAP + 4;
 
 function NativeComposer({
@@ -416,16 +416,18 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000000" },
   status: { color: "#8b949e", fontSize: 12, textAlign: "center", padding: 4 },
   empty: { color: "#484f58", textAlign: "center", marginTop: 48 },
+  // Genre look (ChatGPT/Claude): user text in a neutral dark block with a
+  // modest, even corner radius — not the iOS-Messages pill.
   bubble: {
     maxWidth: "85%",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     marginHorizontal: 12,
     marginVertical: 4,
   },
-  userBubble: { alignSelf: "flex-end", backgroundColor: "#238636" },
-  userText: { color: "#fff", fontSize: 18, lineHeight: 24 },
+  userBubble: { alignSelf: "flex-end", backgroundColor: "#2a2a2a" },
+  userText: { color: "#e6edf3", fontSize: 18, lineHeight: 24 },
   assistantBlock: {
     alignSelf: "stretch",
     marginHorizontal: 16,
