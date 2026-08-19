@@ -110,7 +110,15 @@ function NativeComposer({
   const bubbleH = INPUT_PAD_TOP + inputH + INPUT_PAD_BOTTOM;
   return (
     <View style={{ height: bubbleH }}>
-      <S.Host style={StyleSheet.absoluteFill} colorScheme="dark" pointerEvents="none">
+      {/* ignoreSafeArea: hosting views apply the KEYBOARD safe area to
+          their SwiftUI content by default — iOS itself was insetting and
+          re-animating the glass during keyboard transitions. */}
+      <S.Host
+        style={StyleSheet.absoluteFill}
+        colorScheme="dark"
+        pointerEvents="none"
+        ignoreSafeArea="all"
+      >
         <S.HStack
           modifiers={[
             m.frame({ maxWidth: 9999, maxHeight: 9999 }),
@@ -153,7 +161,11 @@ function NativeComposer({
         {draft.length > 0 ? draft + "\u200b" : "X"}
       </Text>
       <View style={styles.sendSeat}>
-        <S.Host style={{ width: SEND_DIAMETER, height: SEND_DIAMETER }} colorScheme="dark">
+        <S.Host
+          style={{ width: SEND_DIAMETER, height: SEND_DIAMETER }}
+          colorScheme="dark"
+          ignoreSafeArea="all"
+        >
           <S.Image
             systemName="arrow.up"
             size={16}
