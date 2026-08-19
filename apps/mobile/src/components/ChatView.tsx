@@ -17,6 +17,7 @@ import { AttachHandle, attachChat, ConnectionConfig } from "../client";
 import { IconButton } from "./IconButton";
 import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { ChatItem, inputMessage } from "../proto";
+import { useSessions } from "../sessions";
 
 interface Props {
   cfg: ConnectionConfig;
@@ -24,6 +25,8 @@ interface Props {
 }
 
 export function ChatView({ cfg, session }: Props) {
+  const sessions = useSessions(cfg);
+  const agentName = sessions.data?.find((s) => s.id === session)?.name ?? "agent";
   const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState("connecting…");
   const [draft, setDraft] = useState("");
@@ -121,9 +124,10 @@ export function ChatView({ cfg, session }: Props) {
         }
       />
       <View style={styles.inputRow}>
-        <View style={styles.inputWrap}>
+        <View style={[styles.bubbleWrap, SwiftUI === null && styles.bubbleFallback]}>
           {SwiftUI !== null && SwiftUIModifiers !== null && (
-            // Liquid Glass capsule floating behind the transparent field.
+            // Liquid Glass panel floating behind the transparent field; the
+            // wrapper's minHeight keeps the fill measurable keyboard-closed.
             <SwiftUI.Host
               style={StyleSheet.absoluteFill}
               colorScheme="dark"
@@ -132,10 +136,15 @@ export function ChatView({ cfg, session }: Props) {
             >
               <SwiftUI.HStack
                 modifiers={[
-                  SwiftUIModifiers.frame({ maxWidth: 9999, maxHeight: 9999 }),
+                  SwiftUIModifiers.frame({
+                    maxWidth: 9999,
+                    maxHeight: 9999,
+                    minHeight: 80,
+                  }),
                   SwiftUIModifiers.glassEffect({
                     glass: { variant: "regular" },
-                    shape: "capsule",
+                    shape: "roundedRectangle",
+                    cornerRadius: 26,
                   }),
                 ]}
               >
@@ -144,23 +153,25 @@ export function ChatView({ cfg, session }: Props) {
             </SwiftUI.Host>
           )}
           <TextInput
-            style={[styles.input, SwiftUI !== null && styles.inputOnGlass]}
+            style={styles.input}
             value={draft}
             onChangeText={setDraft}
-            placeholder="Message the agent…"
+            placeholder={`Ask ${agentName}`}
             placeholderTextColor="#8b949e"
             multiline
             autoCapitalize="none"
             autoCorrect
           />
+          <View style={styles.sendRow}>
+            {SwiftUI !== null ? (
+              <IconButton symbol="arrow.up" fallback="↑" onPress={sendDraft} accent size={34} />
+            ) : (
+              <Pressable style={styles.sendBtn} onPress={sendDraft}>
+                <Text style={styles.sendText}>↑</Text>
+              </Pressable>
+            )}
+          </View>
         </View>
-        {SwiftUI !== null ? (
-          <IconButton symbol="arrow.up" fallback="↑" onPress={sendDraft} accent />
-        ) : (
-          <Pressable style={styles.sendBtn} onPress={sendDraft}>
-            <Text style={styles.sendText}>↑</Text>
-          </Pressable>
-        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -204,17 +215,25 @@ const styles = StyleSheet.create({
     gap: 8,
     backgroundColor: "transparent",
   },
-  inputWrap: { flex: 1, justifyContent: "center" },
+  // Full-width floating bubble: input row on top, send circle bottom-right.
+  bubbleWrap: {
+    flex: 1,
+    minHeight: 80,
+    borderRadius: 26,
+    overflow: "hidden",
+    paddingBottom: 8,
+  },
+  bubbleFallback: { backgroundColor: "#141414" },
   input: {
     color: "#c9d1d9",
-    backgroundColor: "#141414",
-    borderRadius: 22,
+    backgroundColor: "transparent",
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
     maxHeight: 120,
     fontSize: 15,
   },
-  inputOnGlass: { backgroundColor: "transparent" },
+  sendRow: { flexDirection: "row", justifyContent: "flex-end", paddingRight: 8 },
   sendBtn: {
     width: 36,
     height: 36,

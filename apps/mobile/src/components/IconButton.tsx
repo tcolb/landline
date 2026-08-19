@@ -40,7 +40,7 @@ export function IconButton({ symbol, fallback, onPress, size = BAR_BUTTON_SIZE, 
         <SwiftUI.Button onPress={onPress} modifiers={modifiers}>
           <SwiftUI.Image
             systemName={symbol as never}
-            size={BAR_SYMBOL_SIZE}
+            size={Math.min(BAR_SYMBOL_SIZE, Math.round(size * 0.42))}
             color={accent ? "#ffffff" : "#e6edf3"}
             modifiers={labelFrame}
           />
