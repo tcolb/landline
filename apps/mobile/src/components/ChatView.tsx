@@ -60,14 +60,19 @@ const nativeComposer = SwiftUI !== null && SwiftUIModifiers !== null && anim !==
 /** The whole composer as a single SwiftUI subtree: glass panel containing
  * the multiline field and the send circle. Sizes itself (matchContents);
  * grows with text. */
-/** Bubble geometry. The send circle is built at an exact diameter (glass
- * applied to a fixed frame, not a system-padded button), so the concentric
- * seat is exact by construction: with gap = R - D/2 on both axes the
- * circle's center coincides with the corner arc's center, making the
- * clearance identical along the edges and the diagonal. */
+/** Bubble geometry. RN owns ALL of it: the input's content height (via
+ * onContentSizeChange) drives the bubble height in the same RN commit that
+ * resizes the glass host (absoluteFill) — one framework, one layout pass,
+ * no cross-framework seam frames. SwiftUI is decoration only: the glass
+ * fill and the fixed-size send circle, neither of which is ever measured.
+ * Send seat is concentric by construction: gap = R - D/2. */
 const BUBBLE_RADIUS = 26;
 const SEND_DIAMETER = 36;
 const SEND_GAP = BUBBLE_RADIUS - SEND_DIAMETER / 2;
+const INPUT_LINE = 24;
+const INPUT_MAX_LINES = 5;
+const INPUT_PAD_TOP = 14;
+const INPUT_PAD_BOTTOM = SEND_DIAMETER + SEND_GAP + 4;
 
 function NativeComposer({
   agentName,
@@ -78,62 +83,52 @@ function NativeComposer({
 }) {
   const S = SwiftUI!;
   const m = SwiftUIModifiers!;
-  const draft = useRef("");
-  const field = useRef<import("@expo/ui/swift-ui").TextFieldRef>(null);
+  const [draft, setDraft] = useState("");
+  const [contentH, setContentH] = useState(INPUT_LINE);
+  const input = useRef<TextInput>(null);
   const send = () => {
-    const text = draft.current.trim();
+    const text = draft.trim();
     if (text === "") return;
     onSend(text);
-    draft.current = "";
-    field.current?.clear();
+    setDraft("");
+    setContentH(INPUT_LINE);
   };
-  // Swipe-away (or any app-wide dismissal): the SwiftUI TextField is
-  // invisible to RN's Keyboard.dismiss(), blur it via its native ref.
-  useEffect(() => onDismissAllKeyboards(() => void field.current?.blur()), []);
+  // Swipe-away (or any app-wide dismissal): blur the field. RN tracks this
+  // input, so Keyboard.dismiss() also works — the bus blur is belt and
+  // braces.
+  useEffect(() => onDismissAllKeyboards(() => input.current?.blur()), []);
+
+  const inputH = Math.min(INPUT_MAX_LINES * INPUT_LINE, Math.max(INPUT_LINE, contentH));
+  const bubbleH = INPUT_PAD_TOP + inputH + INPUT_PAD_BOTTOM;
   return (
-    <View>
-      {/* Growing part: glass panel + field. Reserves the send strip via
-          bottom padding; bottom-anchored so the matchContents lag frame
-          overflows upward. */}
-      <S.Host
-        style={styles.nativeHost}
-        colorScheme="dark"
-        matchContents={{ vertical: true }}
-      >
-        <S.VStack
+    <View style={{ height: bubbleH }}>
+      <S.Host style={StyleSheet.absoluteFill} colorScheme="dark" pointerEvents="none">
+        <S.HStack
           modifiers={[
+            m.frame({ maxWidth: 9999, maxHeight: 9999 }),
             m.glassEffect({
               glass: { variant: "regular" },
               shape: "roundedRectangle",
               cornerRadius: BUBBLE_RADIUS,
             }),
-            m.frame({ maxWidth: 9999, maxHeight: 9999, alignment: "bottom" }),
           ]}
         >
-          <S.TextField
-            ref={field}
-            axis="vertical"
-            placeholder={`Ask ${agentName}`}
-            onTextChange={(t) => {
-              draft.current = t;
-            }}
-            modifiers={[
-              m.font({ size: 18 }),
-              m.lineLimit(5),
-              m.padding({
-                leading: 16,
-                trailing: 16,
-                top: 14,
-                bottom: SEND_DIAMETER + SEND_GAP + 6,
-              }),
-              m.textFieldStyle("plain"),
-            ]}
-          />
-        </S.VStack>
+          <S.Spacer />
+        </S.HStack>
       </S.Host>
-      {/* Fixed part: the send circle in its own host, absolutely seated in
-          the corner — completely decoupled from text growth, so it can
-          never jump. */}
+      <TextInput
+        ref={input}
+        style={[styles.nativeInput, { height: inputH }]}
+        value={draft}
+        onChangeText={setDraft}
+        onContentSizeChange={(e) => setContentH(e.nativeEvent.contentSize.height)}
+        placeholder={`Ask ${agentName}`}
+        placeholderTextColor="#8b949e"
+        multiline
+        scrollEnabled={contentH > INPUT_MAX_LINES * INPUT_LINE}
+        autoCapitalize="none"
+        autoCorrect
+      />
       <View style={styles.sendSeat}>
         <S.Host style={{ width: SEND_DIAMETER, height: SEND_DIAMETER }} colorScheme="dark">
           <S.Image
@@ -413,7 +408,19 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingBottom: 10,
   },
-  nativeHost: { width: "100%" },
+  nativeInput: {
+    position: "absolute",
+    top: INPUT_PAD_TOP,
+    left: 16,
+    right: 16,
+    color: "#e6edf3",
+    backgroundColor: "transparent",
+    fontSize: 18,
+    lineHeight: INPUT_LINE,
+    paddingTop: 0,
+    paddingBottom: 0,
+    textAlignVertical: "top",
+  },
   sendSeat: { position: "absolute", right: SEND_GAP, bottom: SEND_GAP },
   // Fallback composer.
   fallbackRow: {
