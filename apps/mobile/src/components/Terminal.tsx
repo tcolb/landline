@@ -28,6 +28,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { LandlineKeyInput } from "../../modules/key-input";
 import { AttachHandle, attachFrames, ConnectionConfig } from "../client";
 import { stats } from "../stats";
 import {
@@ -327,6 +328,8 @@ export function Terminal({ cfg, session, onBack }: Props) {
   /** Bumped to remount the input: setNativeProps({text}) is a silent no-op
    * on the new architecture, so remount is the only dependable refill. */
   const [inputEpoch, setInputEpoch] = useState(0);
+  /** iOS native key view focus (soft keyboard visibility). */
+  const [kbFocused, setKbFocused] = useState(true);
   const inputRef = useRef<TextInput>(null);
   const ctrlRef = useRef(false);
   ctrlRef.current = ctrl;
@@ -502,7 +505,10 @@ export function Terminal({ cfg, session, onBack }: Props) {
         }
       },
       onPanResponderRelease: (_e, g) => {
-        if (Math.abs(g.dy) < 6 && Math.abs(g.dx) < 6) inputRef.current?.focus();
+        if (Math.abs(g.dy) < 6 && Math.abs(g.dx) < 6) {
+          setKbFocused(true);
+          inputRef.current?.focus();
+        }
       },
     }),
   ).current;
@@ -653,6 +659,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
           onPress={() => {
             // Dismissing alone is unreliable while the hidden input holds
             // focus; blur it explicitly first.
+            setKbFocused(false);
             inputRef.current?.blur();
             Keyboard.dismiss();
           }}
@@ -660,6 +667,19 @@ export function Terminal({ cfg, session, onBack }: Props) {
           <Text style={styles.keyText}>⌄⌨</Text>
         </Pressable>
       </View>
+      {LandlineKeyInput !== null ? (
+        // iOS: raw UIKeyInput events, one call per keystroke at every
+        // auto-repeat stage — no text field, no diffing, no heuristics.
+        <LandlineKeyInput
+          style={styles.hiddenInput}
+          focused={kbFocused}
+          onInsertText={(e) => {
+            const text = e.nativeEvent.text;
+            sendText(text === "\n" ? "\r" : text);
+          }}
+          onDeleteBackward={() => sendText("\x7f")}
+        />
+      ) : (
       <TextInput
         key={inputEpoch}
         ref={inputRef}
@@ -743,6 +763,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
         autoFocus
         multiline={false}
       />
+      )}
     </KeyboardAvoidingView>
   );
 }

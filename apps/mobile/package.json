@@ -1,6 +1,6 @@
 {
   "name": "landline-mobile",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "main": "index.ts",
   "dependencies": {
     "@legendapp/list": "^3.3.6",
@@ -11,6 +11,7 @@
     "expo-build-properties": "~57.0.12",
     "expo-constants": "~57.0.12",
     "expo-dev-client": "~57.0.13",
+    "expo-modules-core": "^57.0.11",
     "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
     "react-native": "0.86.2",
