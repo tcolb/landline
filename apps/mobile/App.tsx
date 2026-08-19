@@ -68,7 +68,9 @@ function DrawerMain({ cfg }: { cfg: ConnectionConfig }) {
           borderRadius: screenRadius,
           overflow: "hidden",
         },
-        swipeEdgeWidth: 80,
+        // Full-width gesture surface: the tray answers horizontal drags
+        // anywhere on the card, not just the screen edge.
+        swipeEdgeWidth: Dimensions.get("window").width,
       }}
       drawerContent={(props) => (
         <SessionDrawer
