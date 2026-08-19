@@ -15,8 +15,9 @@
 //   its content padding (one relayout per transition, never per frame).
 
 import { LegendList, LegendListRef } from "@legendapp/list/react-native";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -278,6 +279,26 @@ export function ChatView({ cfg, session }: Props) {
   const [draft, setDraft] = useState("");
   const [kbClearance, setKbClearance] = useState(0);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  // Unresolved actions (no linked result yet) render a spinner; if the
+  // newest item is one of them — or a user message awaiting any reply —
+  // the whole session is "working".
+  const { unresolved, working } = useMemo(() => {
+    const resultIds = new Set(
+      items.filter((i) => i.kind === "action_result" && i.call_id).map((i) => i.call_id),
+    );
+    const unresolved = new Set(
+      items
+        .filter(
+          (i) => i.kind === "action" && i.call_id !== undefined && !resultIds.has(i.call_id),
+        )
+        .map((i) => i.id),
+    );
+    const last = items[items.length - 1];
+    const working =
+      last !== undefined &&
+      (unresolved.has(last.id) || (last.kind === "text" && last.role === "user"));
+    return { unresolved, working };
+  }, [items]);
   const handle = useRef<AttachHandle | null>(null);
   const list = useRef<LegendListRef>(null);
 
@@ -363,6 +384,7 @@ export function ChatView({ cfg, session }: Props) {
       );
     }
     if (item.kind === "action" || item.kind === "tool_use") {
+      const running = unresolved.has(item.id);
       return (
         <Pressable style={styles.actionRow} onPress={toggle}>
           <View style={styles.actionChip}>
@@ -370,6 +392,7 @@ export function ChatView({ cfg, session }: Props) {
             <Text style={styles.actionTitle} numberOfLines={1}>
               {item.title ?? item.tool ?? "tool"}
             </Text>
+            {running && <ActivityIndicator size="small" color="#8b949e" />}
           </View>
           {expanded && (
             <Text style={styles.toolText} numberOfLines={12}>
@@ -380,10 +403,18 @@ export function ChatView({ cfg, session }: Props) {
       );
     }
     if (item.kind === "action_result" || item.kind === "tool_result") {
+      const failed = item.ok === false;
       return (
-        <Pressable style={styles.toolRow} onPress={toggle}>
-          <Text style={styles.toolText} numberOfLines={expanded ? 40 : 3}>
+        <Pressable
+          style={[styles.toolRow, failed && styles.toolRowFailed]}
+          onPress={toggle}
+        >
+          <Text
+            style={[styles.toolText, failed && styles.toolTextFailed]}
+            numberOfLines={expanded ? 40 : 3}
+          >
             {item.text}
+            {item.truncated ? " …(truncated — see terminal)" : ""}
           </Text>
         </Pressable>
       );
@@ -413,6 +444,14 @@ export function ChatView({ cfg, session }: Props) {
       estimatedItemSize={64}
       recycleItems
       contentContainerStyle={{ paddingBottom: kbClearance + 120 }}
+      ListFooterComponent={
+        working ? (
+          <View style={styles.workingRow}>
+            <ActivityIndicator size="small" color="#6e7681" />
+            <Text style={styles.workingText}>working…</Text>
+          </View>
+        ) : null
+      }
       ListEmptyComponent={
         <Text style={styles.empty}>
           {status === "" ? "no messages yet — say something" : ""}
@@ -485,6 +524,16 @@ const styles = StyleSheet.create({
     marginVertical: 6,
   },
   assistantText: { color: "#c9d1d9", fontSize: 18, lineHeight: 27 },
+  workingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginVertical: 8,
+  },
+  workingText: { color: "#6e7681", fontSize: 14, fontStyle: "italic" },
+  toolRowFailed: { borderLeftColor: "#f85149" },
+  toolTextFailed: { color: "#f85149" },
   toolRow: {
     alignSelf: "stretch",
     backgroundColor: "#141414",

@@ -141,7 +141,10 @@ adapters): `category` is the semantic class (command | file_edit |
 file_read | search | subagent | web | other), `title` a short human line,
 `target` the primary object (path, command, url, agent type), `call_id`
 the harness id linking an `action_result` to its `action`; `text` keeps
-the raw input/output. All of these fields are optional (feature
+the raw input/output. Results also carry `ok` (false when the harness
+marked the call failed) and `truncated` (true when `text` was capped
+server-side; the terminal view holds full output). A client can derive a
+"working" state from any action whose `call_id` has no result yet. All of these fields are optional (feature
 `chat-actions`, additive). Input/resize/detach behave exactly as in the
 other modes — chat input types into the same PTY the terminal views show.
 

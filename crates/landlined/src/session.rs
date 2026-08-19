@@ -69,6 +69,8 @@ pub struct NewChatItem {
     pub title: Option<String>,
     pub target: Option<String>,
     pub call_id: Option<String>,
+    pub ok: Option<bool>,
+    pub truncated: Option<bool>,
 }
 
 pub struct Session {
@@ -113,6 +115,8 @@ impl Session {
             title: new.title,
             target: new.target,
             call_id: new.call_id,
+            ok: new.ok,
+            truncated: new.truncated,
         };
         self.chat_items.lock().unwrap().push(item.clone());
         let _ = self.chat_events.send(ChatEvent::Item(item));

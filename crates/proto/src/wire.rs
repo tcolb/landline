@@ -284,6 +284,12 @@ pub struct ChatItem {
     /// Harness call id linking an action_result to its action.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub call_id: Option<String>,
+    /// For action_result: false when the harness marked the call failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    /// True when `text` was capped server-side.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub truncated: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

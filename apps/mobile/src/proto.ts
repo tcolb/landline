@@ -79,6 +79,10 @@ export interface ChatItem {
   target?: string;
   /** Harness call id linking an action_result to its action. */
   call_id?: string;
+  /** For action_result: false when the harness marked the call failed. */
+  ok?: boolean;
+  /** True when text was capped server-side. */
+  truncated?: boolean;
 }
 
 export interface SpawnRequest {

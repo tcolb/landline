@@ -45,6 +45,17 @@ fn parse_line(spec: &HarnessSpec, line: &str) -> Vec<NewChatItem> {
     }
 }
 
+/// Cap huge result payloads before they hit the wire; the terminal view
+/// is the place to read full output.
+const RESULT_TEXT_CAP: usize = 4096;
+
+fn cap_text(text: String) -> (String, Option<bool>) {
+    if text.chars().count() <= RESULT_TEXT_CAP {
+        return (text, None);
+    }
+    (text.chars().take(RESULT_TEXT_CAP).collect(), Some(true))
+}
+
 fn text_item(role: &str, kind: &str, text: String) -> NewChatItem {
     NewChatItem {
         role: role.into(),
@@ -99,6 +110,7 @@ fn parse_claude(spec: &HarnessSpec, v: &serde_json::Value) -> Vec<NewChatItem> {
                                 .get("id")
                                 .and_then(|i| i.as_str())
                                 .map(String::from),
+                            ..NewChatItem::default()
                         });
                     }
                     Some("tool_result") => {
@@ -107,6 +119,7 @@ fn parse_claude(spec: &HarnessSpec, v: &serde_json::Value) -> Vec<NewChatItem> {
                             Some(other) => other.to_string(),
                             None => String::new(),
                         };
+                        let (text, truncated) = cap_text(text);
                         out.push(NewChatItem {
                             role: "tool".into(),
                             kind: "action_result".into(),
@@ -115,6 +128,13 @@ fn parse_claude(spec: &HarnessSpec, v: &serde_json::Value) -> Vec<NewChatItem> {
                                 .get("tool_use_id")
                                 .and_then(|i| i.as_str())
                                 .map(String::from),
+                            ok: Some(
+                                !part
+                                    .get("is_error")
+                                    .and_then(|e| e.as_bool())
+                                    .unwrap_or(false),
+                            ),
+                            truncated,
                             ..NewChatItem::default()
                         });
                     }
@@ -235,6 +255,21 @@ mod tests {
         assert_eq!(items[0].kind, "action_result");
         assert_eq!(items[0].call_id.as_deref(), Some("t1"));
         assert!(parse_line(&spec(), skip).is_empty());
+    }
+
+    #[test]
+    fn result_error_flag_and_truncation() {
+        let err = r#"{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"boom"}]}}"#;
+        let items = parse_line(&spec(), err);
+        assert_eq!(items[0].ok, Some(false));
+        let big = "x".repeat(5000);
+        let line = format!(
+            r#"{{"type":"user","message":{{"content":[{{"type":"tool_result","tool_use_id":"t3","content":"{big}"}}]}}}}"#
+        );
+        let items = parse_line(&spec(), &line);
+        assert_eq!(items[0].truncated, Some(true));
+        assert_eq!(items[0].text.chars().count(), 4096);
+        assert_eq!(items[0].ok, Some(true));
     }
 
     #[test]
