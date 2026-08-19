@@ -136,7 +136,15 @@ function NativeComposer({
         ref={input}
         style={[styles.nativeInput, { height: inputH }]}
         value={draft}
-        onChangeText={setDraft}
+        onChangeText={(t) => {
+          setDraft(t);
+          // Newline growth is deterministic — commit it in the SAME frame
+          // as the text. Waiting for the async measurer leaves a lag frame
+          // in which UITextView scrolls the caret into view, permanently
+          // shifting the content up a row.
+          const minH = ((t.match(/\n/g)?.length ?? 0) + 1) * INPUT_LINE;
+          if (minH > contentH && editing.current) setContentH(minH);
+        }}
         onFocus={() => {
           editing.current = true;
         }}
