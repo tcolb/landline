@@ -5,6 +5,7 @@
 import { LegendList, LegendListRef } from "@legendapp/list/react-native";
 import React, { useEffect, useRef, useState } from "react";
 import {
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -36,18 +37,27 @@ const kbKit = (() => {
   }
 })();
 
-function KbSynced({ children }: { children: React.ReactNode }) {
+/** Lifts the composer with a pure transform tracking the keyboard's top
+ * edge on the UI thread — no per-frame layout, so the motion is glued to
+ * the keyboard and the bubble's internals never reflow. */
+function ComposerLift({ children }: { children: React.ReactNode }) {
   const k = kbKit!;
   const kb = k.useAnimatedKeyboard();
   const style = k.useAnimatedStyle(() => ({
-    paddingBottom: kb.height.value,
+    transform: [{ translateY: -kb.height.value }],
   }));
   const A = k.Animated.View;
-  return <A style={[styles.root, style]}>{children}</A>;
+  return <A style={style}>{children}</A>;
+}
+
+function ComposerLiftMaybe({ children }: { children: React.ReactNode }) {
+  if (kbKit !== null) return <ComposerLift>{children}</ComposerLift>;
+  return <>{children}</>;
 }
 
 function KbAvoiding({ children }: { children: React.ReactNode }) {
-  if (kbKit !== null) return <KbSynced>{children}</KbSynced>;
+  // With reanimated the lift is handled per-component; plain container here.
+  if (kbKit !== null) return <View style={styles.root}>{children}</View>;
   return (
     <KeyboardAvoidingView
       style={styles.root}
@@ -65,7 +75,27 @@ interface Props {
 
 export function ChatView({ cfg, session }: Props) {
   const sessions = useSessions(cfg);
-  const agentName = sessions.data?.find((s) => s.id === session)?.name ?? "agent";
+  // The agent's identity is its command ("claude" -> "Claude"), never the
+  // session id.
+  const agentCmd = sessions.data?.find((s) => s.id === session)?.cmd?.[0] ?? "";
+  const agentBase = agentCmd.split("/").pop() ?? "";
+  const agentName =
+    agentBase === "" ? "agent" : agentBase.charAt(0).toUpperCase() + agentBase.slice(1);
+  // List clearance under the lifted composer: single relayout per keyboard
+  // transition (not per-frame), content just scrolls up behind it.
+  const [kbClearance, setKbClearance] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== "ios" || kbKit === null) return;
+    const show = Keyboard.addListener("keyboardWillShow", (e) => {
+      setKbClearance(e.endCoordinates.height);
+      requestAnimationFrame(() => list.current?.scrollToEnd({ animated: true }));
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", () => setKbClearance(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
   const [items, setItems] = useState<ChatItem[]>([]);
   const [status, setStatus] = useState("connecting…");
   const [draft, setDraft] = useState("");
@@ -161,12 +191,14 @@ export function ChatView({ cfg, session }: Props) {
         renderItem={renderItem}
         estimatedItemSize={64}
         recycleItems
+        contentContainerStyle={{ paddingBottom: kbClearance }}
         ListEmptyComponent={
           <Text style={styles.empty}>
             {status === "" ? "no messages yet — say something" : ""}
           </Text>
         }
       />
+      <ComposerLiftMaybe>
       <View style={styles.inputRow}>
         <View style={[styles.bubbleWrap, SwiftUI === null && styles.bubbleFallback]}>
           {SwiftUI !== null && SwiftUIModifiers !== null && (
@@ -217,6 +249,7 @@ export function ChatView({ cfg, session }: Props) {
           </View>
         </View>
       </View>
+      </ComposerLiftMaybe>
     </KbAvoiding>
   );
 }
@@ -234,13 +267,13 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   userBubble: { alignSelf: "flex-end", backgroundColor: "#238636" },
-  userText: { color: "#fff", fontSize: 15 },
+  userText: { color: "#fff", fontSize: 16, lineHeight: 22 },
   assistantBlock: {
     alignSelf: "stretch",
     marginHorizontal: 16,
     marginVertical: 6,
   },
-  assistantText: { color: "#c9d1d9", fontSize: 15, lineHeight: 22 },
+  assistantText: { color: "#c9d1d9", fontSize: 16, lineHeight: 24 },
   toolRow: {
     alignSelf: "stretch",
     backgroundColor: "#141414",
@@ -274,10 +307,11 @@ const styles = StyleSheet.create({
     color: "#c9d1d9",
     backgroundColor: "transparent",
     paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 4,
+    paddingTop: 14,
+    paddingBottom: 6,
     maxHeight: 120,
-    fontSize: 15,
+    fontSize: 17,
+    lineHeight: 22,
   },
   sendRow: { flexDirection: "row", justifyContent: "flex-end", paddingRight: 8 },
   sendBtn: {
