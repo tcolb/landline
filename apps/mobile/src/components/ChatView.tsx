@@ -80,7 +80,7 @@ function NativeComposer({
       <S.VStack
         spacing={2}
         modifiers={[
-          m.padding({ top: 6, bottom: 6, leading: 4, trailing: 6 }),
+          m.padding({ top: 6, bottom: 8, leading: 4, trailing: 8 }),
           m.glassEffect({
             glass: { variant: "regular" },
             shape: "roundedRectangle",
@@ -96,7 +96,7 @@ function NativeComposer({
             draft.current = t;
           }}
           modifiers={[
-            m.font({ size: 17 }),
+            m.font({ size: 18 }),
             m.lineLimit(5),
             m.padding({ leading: 12, trailing: 8, top: 6 }),
             m.textFieldStyle("plain"),
@@ -114,9 +114,9 @@ function NativeComposer({
           >
             <S.Image
               systemName="arrow.up"
-              size={14}
+              size={16}
               color="#ffffff"
-              modifiers={[m.frame({ width: 18, height: 18 })]}
+              modifiers={[m.frame({ width: 22, height: 22 })]}
             />
           </S.Button>
         </S.HStack>
@@ -321,13 +321,13 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   userBubble: { alignSelf: "flex-end", backgroundColor: "#238636" },
-  userText: { color: "#fff", fontSize: 16, lineHeight: 22 },
+  userText: { color: "#fff", fontSize: 18, lineHeight: 24 },
   assistantBlock: {
     alignSelf: "stretch",
     marginHorizontal: 16,
     marginVertical: 6,
   },
-  assistantText: { color: "#c9d1d9", fontSize: 16, lineHeight: 24 },
+  assistantText: { color: "#c9d1d9", fontSize: 18, lineHeight: 27 },
   toolRow: {
     alignSelf: "stretch",
     backgroundColor: "#141414",
