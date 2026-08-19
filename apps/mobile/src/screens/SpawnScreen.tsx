@@ -322,11 +322,11 @@ function LegacySpawn({ navigation, cfg, onSpawned }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0d1117", padding: 16 },
+  root: { flex: 1, backgroundColor: "#000000", padding: 16 },
   label: { color: "#8b949e", fontSize: 12, marginBottom: 4, marginTop: 8 },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   chip: {
-    backgroundColor: "#21262d",
+    backgroundColor: "#1e1e1e",
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 6,
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   chipActive: { backgroundColor: "#238636" },
   chipText: { color: "#c9d1d9", fontSize: 13 },
   input: {
-    backgroundColor: "#161b22",
+    backgroundColor: "#141414",
     color: "#c9d1d9",
     borderRadius: 8,
     padding: 12,

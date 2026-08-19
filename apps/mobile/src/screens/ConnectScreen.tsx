@@ -141,7 +141,7 @@ function LegacyConnect({ initial, onConnected }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0d1117", padding: 24, justifyContent: "center" },
+  root: { flex: 1, backgroundColor: "#000000", padding: 24, justifyContent: "center" },
   title: {
     color: "#c9d1d9",
     fontSize: 28,
@@ -152,7 +152,7 @@ const styles = StyleSheet.create({
   version: { color: "#484f58", fontSize: 12, textAlign: "center", marginBottom: 24 },
   label: { color: "#8b949e", fontSize: 12, marginBottom: 4 },
   input: {
-    backgroundColor: "#161b22",
+    backgroundColor: "#141414",
     color: "#c9d1d9",
     borderRadius: 8,
     padding: 12,

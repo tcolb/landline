@@ -141,7 +141,7 @@ export function SessionsScreen({ navigation, cfg, onDisconnect }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0d1117" },
+  root: { flex: 1, backgroundColor: "#000000" },
   headerAction: { color: "#3fb950", fontSize: 22, fontWeight: "600" },
   headerDim: { color: "#8b949e", fontSize: 13 },
   row: {
@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#21262d",
+    borderBottomColor: "#1e1e1e",
     gap: 10,
   },
   rowBody: { flex: 1 },
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
   empty: { textAlign: "center", marginTop: 48 },
   error: { color: "#f85149", paddingHorizontal: 16, paddingVertical: 4 },
   killBtn: {
-    backgroundColor: "#21262d",
+    backgroundColor: "#1e1e1e",
     borderRadius: 6,
     paddingHorizontal: 10,
     paddingVertical: 5,

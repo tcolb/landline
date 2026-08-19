@@ -12,6 +12,7 @@ import { ScrollView, StyleSheet, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionConfig } from "./src/client";
 import { drawerKit } from "./src/drawer-nav";
+import { getScreenCornerRadius } from "./modules/key-input";
 import { ConnectScreen } from "./src/screens/ConnectScreen";
 import { useSelection } from "./src/selection";
 import { SessionDrawer } from "./src/screens/SessionDrawer";
@@ -44,20 +45,29 @@ function DrawerMain({
   onDisconnect(): void;
 }) {
   const { selection, setSelection } = useSelection();
+  const [screenRadius, setScreenRadius] = useState(44);
+  useEffect(() => {
+    getScreenCornerRadius().then((r) => r > 0 && setScreenRadius(r));
+  }, []);
   const D = Drawer!;
   return (
     <D.Navigator
       screenOptions={{
         headerShown: false,
         drawerType: "slide",
-        overlayColor: "transparent",
-        drawerStyle: { backgroundColor: "#010409", width: 290 },
+        // The washed-out look the genre apps give the displaced scene:
+        // a translucent white scrim, animated with drawer progress.
+        overlayColor: "rgba(255,255,255,0.07)",
+        drawerStyle: { backgroundColor: "#000000", width: 290 },
         sceneStyle: {
-          backgroundColor: "#0d1117",
-          borderRadius: 14,
+          backgroundColor: "#000000",
+          // Matches the device's physical display corner radius (same
+          // trick X/Claude/ChatGPT use), so closed-state corners coincide
+          // with the hardware and the card only "appears" when displaced.
+          borderRadius: screenRadius,
           overflow: "hidden",
           borderWidth: StyleSheet.hairlineWidth,
-          borderColor: "#21262d",
+          borderColor: "#2a2a2a",
         },
         swipeEdgeWidth: 80,
       }}
@@ -94,11 +104,11 @@ const theme = {
   ...DarkTheme,
   colors: {
     ...DarkTheme.colors,
-    background: "#0d1117",
-    card: "#0d1117",
+    background: "#000000",
+    card: "#000000",
     text: "#c9d1d9",
     primary: "#3fb950",
-    border: "#21262d",
+    border: "#1e1e1e",
   },
 };
 
@@ -268,7 +278,7 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  crash: { flex: 1, backgroundColor: "#0d1117", padding: 16 },
+  crash: { flex: 1, backgroundColor: "#000000", padding: 16 },
   crashTitle: { color: "#f85149", fontSize: 18, fontWeight: "600", marginBottom: 8 },
   crashText: { color: "#c9d1d9", fontFamily: "monospace", fontSize: 12 },
 });

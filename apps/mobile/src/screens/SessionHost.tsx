@@ -7,6 +7,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
 import { ChatView } from "../components/ChatView";
+import { IconButton } from "../components/IconButton";
 import { Terminal } from "../components/Terminal";
 import { SessionSelection } from "./SessionDrawer";
 
@@ -38,9 +39,7 @@ export function SessionHost({ cfg, selection, openDrawer }: Props) {
   return (
     <SafeAreaView style={styles.root} edges={["top", "bottom"]}>
       <View style={styles.bar}>
-        <Pressable onPress={openDrawer} hitSlop={12}>
-          <Text style={styles.menu}>☰</Text>
-        </Pressable>
+        <IconButton symbol="line.3.horizontal" fallback="☰" onPress={openDrawer} />
         {chatCapable ? (
           <View style={styles.segments}>
             {(["terminal", "chat"] as const).map((v) => (
@@ -60,7 +59,7 @@ export function SessionHost({ cfg, selection, openDrawer }: Props) {
         ) : (
           <Text style={styles.titleText}>{selection.id}</Text>
         )}
-        <View style={styles.menuSpacer} />
+        <View style={{ width: 32 }} />
       </View>
       {activeView === "chat" ? (
         <ChatView cfg={cfg} session={selection.id} />
@@ -72,7 +71,7 @@ export function SessionHost({ cfg, selection, openDrawer }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0d1117" },
+  root: { flex: 1, backgroundColor: "#000000" },
   bar: {
     flexDirection: "row",
     alignItems: "center",
@@ -85,12 +84,12 @@ const styles = StyleSheet.create({
   titleText: { color: "#8b949e", fontSize: 13 },
   segments: {
     flexDirection: "row",
-    backgroundColor: "#161b22",
+    backgroundColor: "#141414",
     borderRadius: 8,
     padding: 2,
   },
   segment: { paddingHorizontal: 16, paddingVertical: 5, borderRadius: 6 },
-  segmentActive: { backgroundColor: "#21262d" },
+  segmentActive: { backgroundColor: "#1e1e1e" },
   segmentText: { color: "#8b949e", fontSize: 13 },
   segmentTextActive: { color: "#c9d1d9", fontSize: 13, fontWeight: "600" },
   emptyWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 16 },

@@ -16,6 +16,13 @@ public class KeyInputModule: Module {
   public func definition() -> ModuleDefinition {
     Name("LandlineKeyInput")
 
+    // Device display corner radius (the private UIScreen key every app in
+    // this genre reads) so the drawer's displaced card matches hardware
+    // corners exactly. 0 on square-cornered devices.
+    AsyncFunction("getScreenCornerRadius") { () -> Double in
+      (UIScreen.main.value(forKey: "_display" + "CornerRadius") as? Double) ?? 0
+    }.runOnQueue(.main)
+
     View(KeyInputView.self) {
       Events("onInsertText", "onDeleteBackward")
 

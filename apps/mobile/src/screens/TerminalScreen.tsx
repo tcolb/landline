@@ -48,7 +48,7 @@ export function TerminalScreen({ route, navigation, cfg }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0d1117" },
+  root: { flex: 1, backgroundColor: "#000000" },
   toggleRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -60,12 +60,12 @@ const styles = StyleSheet.create({
   backSpacer: { width: 24 },
   segments: {
     flexDirection: "row",
-    backgroundColor: "#161b22",
+    backgroundColor: "#141414",
     borderRadius: 8,
     padding: 2,
   },
   segment: { paddingHorizontal: 16, paddingVertical: 5, borderRadius: 6 },
-  segmentActive: { backgroundColor: "#21262d" },
+  segmentActive: { backgroundColor: "#1e1e1e" },
   segmentText: { color: "#8b949e", fontSize: 13 },
   segmentTextActive: { color: "#c9d1d9", fontSize: 13, fontWeight: "600" },
 });

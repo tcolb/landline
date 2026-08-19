@@ -42,7 +42,7 @@ import {
   inputMessage,
 } from "../proto";
 
-const BG = "#0d1117";
+const BG = "#000000";
 const FG = "#c9d1d9";
 const FONT_SIZE = 12;
 /** Zero-width-space deletion cushion. 64 chars ≈ 4s of held auto-repeat
@@ -282,7 +282,7 @@ function recordRow(cells: CellData[]): SkPicture {
       continue;
     }
     const inverse = c.fl & FLAG_INVERSE;
-    const fgTriple = inverse ? (c.bg ?? [13, 17, 23]) : c.fg;
+    const fgTriple = inverse ? (c.bg ?? [0, 0, 0]) : c.fg;
     let color = fgTriple ? `rgb(${fgTriple[0]},${fgTriple[1]},${fgTriple[2]})` : FG;
     if (c.fl & FLAG_FAINT) color = color === FG ? "#8b949e" : color;
     const bold = (c.fl & FLAG_BOLD) !== 0;
@@ -832,8 +832,8 @@ const styles = StyleSheet.create({
     left: 8,
     right: 8,
     zIndex: 10,
-    backgroundColor: "rgba(13,17,23,0.94)",
-    borderColor: "#30363d",
+    backgroundColor: "rgba(0,0,0,0.94)",
+    borderColor: "#2a2a2a",
     borderWidth: 1,
     borderRadius: 8,
     padding: 10,
@@ -846,13 +846,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-evenly",
     paddingVertical: 6,
-    backgroundColor: "#161b22",
+    backgroundColor: "#141414",
   },
   key: {
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 6,
-    backgroundColor: "#21262d",
+    backgroundColor: "#1e1e1e",
   },
   keyActive: { backgroundColor: "#388bfd" },
   keyText: { color: FG, fontSize: 13 },

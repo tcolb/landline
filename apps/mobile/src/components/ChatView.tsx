@@ -138,7 +138,7 @@ export function ChatView({ cfg, session }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#0d1117" },
+  root: { flex: 1, backgroundColor: "#000000" },
   status: { color: "#8b949e", fontSize: 12, textAlign: "center", padding: 4 },
   empty: { color: "#484f58", textAlign: "center", marginTop: 48 },
   bubble: {
@@ -150,14 +150,14 @@ const styles = StyleSheet.create({
     marginVertical: 4,
   },
   userBubble: { alignSelf: "flex-end", backgroundColor: "#238636" },
-  assistantBubble: { alignSelf: "flex-start", backgroundColor: "#21262d" },
+  assistantBubble: { alignSelf: "flex-start", backgroundColor: "#1e1e1e" },
   userText: { color: "#fff", fontSize: 15 },
   assistantText: { color: "#c9d1d9", fontSize: 15 },
   toolRow: {
     alignSelf: "stretch",
-    backgroundColor: "#161b22",
+    backgroundColor: "#141414",
     borderLeftWidth: 2,
-    borderLeftColor: "#30363d",
+    borderLeftColor: "#2a2a2a",
     marginHorizontal: 12,
     marginVertical: 3,
     padding: 8,
@@ -170,12 +170,12 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     padding: 8,
     gap: 8,
-    backgroundColor: "#161b22",
+    backgroundColor: "#141414",
   },
   input: {
     flex: 1,
     color: "#c9d1d9",
-    backgroundColor: "#0d1117",
+    backgroundColor: "#000000",
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 9,

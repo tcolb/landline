@@ -7,6 +7,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
+import { IconButton } from "../components/IconButton";
 import { SessionInfo } from "../proto";
 import { killSession, useSessions } from "../sessions";
 
@@ -54,9 +55,7 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
     <SafeAreaView style={styles.root} edges={["top", "bottom", "left"]}>
       <View style={styles.header}>
         <Text style={styles.title}>landline</Text>
-        <Pressable onPress={onSpawn} hitSlop={12} style={styles.newBtn}>
-          <Text style={styles.newText}>＋</Text>
-        </Pressable>
+        <IconButton symbol="plus" fallback="＋" onPress={onSpawn} accent />
       </View>
       <LegendList
         data={sessions.data ?? []}
@@ -78,7 +77,7 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: "#010409" },
+  root: { flex: 1, backgroundColor: "#000000" },
   header: {
     flexDirection: "row",
     alignItems: "center",
@@ -105,7 +104,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
     borderRadius: 8,
   },
-  rowActive: { backgroundColor: "#161b22" },
+  rowActive: { backgroundColor: "#141414" },
   rowBody: { flex: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   name: { color: "#c9d1d9", fontSize: 14, fontWeight: "500" },
