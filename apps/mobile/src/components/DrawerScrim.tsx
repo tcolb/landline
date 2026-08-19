@@ -70,9 +70,12 @@ function Scrim() {
       }
     },
   );
-  const fillStyle = k.useAnimatedStyle(() => ({
-    opacity: progress.value ?? 0,
-  }));
+  // Cubic ease-in: the wash stays imperceptible through the first half of
+  // the swipe and blooms toward the docked position.
+  const fillStyle = k.useAnimatedStyle(() => {
+    const p = progress.value ?? 0;
+    return { opacity: p * p * p };
+  });
   // Border ramps in fast: any displacement at all shows the card edge,
   // fully invisible only at rest.
   const borderStyle = k.useAnimatedStyle(() => ({
