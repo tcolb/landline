@@ -420,7 +420,10 @@ const styles = StyleSheet.create({
   // modest, even corner radius — not the iOS-Messages pill.
   bubble: {
     maxWidth: "85%",
-    borderRadius: 16,
+    borderRadius: 18,
+    // Apple's continuous corner curve (squircle) — the native softness of
+    // iOS surfaces, vs the basic circular arc borderRadius draws alone.
+    borderCurve: "continuous",
     paddingHorizontal: 14,
     paddingVertical: 10,
     marginHorizontal: 12,
@@ -442,7 +445,8 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginVertical: 3,
     padding: 8,
-    borderRadius: 6,
+    borderRadius: 8,
+    borderCurve: "continuous",
   },
   toolTitle: { color: "#8b949e", fontSize: 12, fontWeight: "600", marginBottom: 2 },
   toolText: { color: "#8b949e", fontFamily: "monospace", fontSize: 11 },
