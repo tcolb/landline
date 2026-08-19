@@ -7,6 +7,7 @@ import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
+import { DrawerRevealFx } from "../components/DrawerScrim";
 import { IconButton } from "../components/IconButton";
 import { SessionInfo } from "../proto";
 import { killSession, useSessions } from "../sessions";
@@ -53,6 +54,7 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
 
   return (
     <SafeAreaView style={styles.root} edges={["top", "bottom", "left"]}>
+      <DrawerRevealFx>
       <View style={styles.header}>
         <Text style={styles.title}>landline</Text>
         <IconButton symbol="plus" fallback="＋" onPress={onSpawn} accent />
@@ -72,6 +74,7 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
       <Pressable onPress={onDisconnect} style={styles.footer}>
         <Text style={styles.dim}>disconnect</Text>
       </Pressable>
+      </DrawerRevealFx>
     </SafeAreaView>
   );
 }

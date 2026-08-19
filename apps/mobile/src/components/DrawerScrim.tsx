@@ -124,26 +124,25 @@ export function DrawerScrim() {
   return kit ? <Scrim /> : null;
 }
 
-function BarFx({ children }: { children: React.ReactNode }) {
+function RevealFx({ children }: { children: React.ReactNode }) {
   const k = kit!;
   const progress = k.useDrawerProgress();
-  // Depth treatment for the in-card bar: recede along z (scale down) and
-  // fade as the card is pulled away, return as it docks. Front-loaded:
-  // the bar slides off-screen in the first third of the drag, so the
-  // whole effect must play out in that window to be visible at all.
+  // Depth treatment for the sidebar: starts recessed (scaled down along z,
+  // faded) beneath the card and rises to full presence as the card is
+  // pulled away, receding again as it docks.
   const style = k.useAnimatedStyle(() => {
-    const p = Math.min((progress.value ?? 0) * 3, 1);
+    const p = progress.value ?? 0;
     return {
-      opacity: 1 - p * 0.85,
-      transform: [{ scale: 1 - p * 0.15 }],
+      opacity: 0.2 + p * 0.8,
+      transform: [{ scale: 0.92 + p * 0.08 }],
     };
   });
   const A = k.Animated.View;
-  return <A style={style}>{children}</A>;
+  return <A style={[{ flex: 1 }, style]}>{children}</A>;
 }
 
-/** Wraps the in-card top bar with the drawer depth/fade treatment; a
+/** Wraps the drawer sidebar content with the reveal depth treatment; a
  * plain passthrough when the drawer stack is unavailable. */
-export function DrawerBarFx({ children }: { children: React.ReactNode }) {
-  return kit ? <BarFx>{children}</BarFx> : <>{children}</>;
+export function DrawerRevealFx({ children }: { children: React.ReactNode }) {
+  return kit ? <RevealFx>{children}</RevealFx> : <>{children}</>;
 }
