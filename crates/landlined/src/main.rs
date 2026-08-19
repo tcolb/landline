@@ -2,6 +2,7 @@ mod attach;
 mod chat;
 mod config;
 mod daemon;
+mod harness;
 mod environment;
 mod paths;
 mod screen;

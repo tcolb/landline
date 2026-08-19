@@ -57,6 +57,29 @@ const anim = (() => {
 
 const nativeComposer = SwiftUI !== null && SwiftUIModifiers !== null && anim !== null;
 
+/** SF symbol per semantic action category (PROTOCOL.md § chat mode). */
+const CATEGORY_SYMBOLS: Record<string, { symbol: string; glyph: string }> = {
+  command: { symbol: "terminal", glyph: ">" },
+  file_edit: { symbol: "pencil", glyph: "✎" },
+  file_read: { symbol: "doc.text", glyph: "≡" },
+  search: { symbol: "magnifyingglass", glyph: "⌕" },
+  subagent: { symbol: "person.2", glyph: "⑂" },
+  web: { symbol: "globe", glyph: "◍" },
+  other: { symbol: "hammer", glyph: "⚒" },
+};
+
+function ActionIcon({ category }: { category: string }) {
+  const meta = CATEGORY_SYMBOLS[category] ?? CATEGORY_SYMBOLS.other;
+  if (SwiftUI !== null) {
+    return (
+      <SwiftUI.Host style={{ width: 16, height: 16 }} colorScheme="dark" pointerEvents="none">
+        <SwiftUI.Image systemName={meta.symbol as never} size={12} color="#8b949e" />
+      </SwiftUI.Host>
+    );
+  }
+  return <Text style={styles.actionGlyph}>{meta.glyph}</Text>;
+}
+
 /** The whole composer as a single SwiftUI subtree: glass panel containing
  * the multiline field and the send circle. Sizes itself (matchContents);
  * grows with text. */
@@ -254,6 +277,7 @@ export function ChatView({ cfg, session }: Props) {
   const [status, setStatus] = useState("connecting…");
   const [draft, setDraft] = useState("");
   const [kbClearance, setKbClearance] = useState(0);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
   const handle = useRef<AttachHandle | null>(null);
   const list = useRef<LegendListRef>(null);
 
@@ -321,23 +345,47 @@ export function ChatView({ cfg, session }: Props) {
   };
 
   const renderItem = ({ item }: { item: ChatItem }) => {
-    if (item.kind === "tool_use") {
+    const expanded = expandedIds.has(item.id);
+    const toggle = () =>
+      setExpandedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(item.id)) next.delete(item.id);
+        else next.add(item.id);
+        return next;
+      });
+    if (item.kind === "thinking") {
       return (
-        <View style={styles.toolRow}>
-          <Text style={styles.toolTitle}>⚒ {item.tool ?? "tool"}</Text>
-          <Text style={styles.toolText} numberOfLines={6}>
+        <Pressable style={styles.thinkingRow} onPress={toggle}>
+          <Text style={styles.thinkingText} numberOfLines={expanded ? undefined : 2}>
             {item.text}
           </Text>
-        </View>
+        </Pressable>
       );
     }
-    if (item.kind === "tool_result") {
+    if (item.kind === "action" || item.kind === "tool_use") {
       return (
-        <View style={styles.toolRow}>
-          <Text style={styles.toolText} numberOfLines={8}>
+        <Pressable style={styles.actionRow} onPress={toggle}>
+          <View style={styles.actionChip}>
+            <ActionIcon category={item.category ?? "other"} />
+            <Text style={styles.actionTitle} numberOfLines={1}>
+              {item.title ?? item.tool ?? "tool"}
+            </Text>
+          </View>
+          {expanded && (
+            <Text style={styles.toolText} numberOfLines={12}>
+              {item.text}
+            </Text>
+          )}
+        </Pressable>
+      );
+    }
+    if (item.kind === "action_result" || item.kind === "tool_result") {
+      return (
+        <Pressable style={styles.toolRow} onPress={toggle}>
+          <Text style={styles.toolText} numberOfLines={expanded ? 40 : 3}>
             {item.text}
           </Text>
-        </View>
+        </Pressable>
       );
     }
     // Genre convention: only the user's messages sit in a bubble; the
@@ -449,6 +497,22 @@ const styles = StyleSheet.create({
     borderCurve: "continuous",
   },
   toolTitle: { color: "#8b949e", fontSize: 12, fontWeight: "600", marginBottom: 2 },
+  thinkingRow: { marginHorizontal: 16, marginVertical: 4 },
+  thinkingText: { color: "#6e7681", fontSize: 14, lineHeight: 20, fontStyle: "italic" },
+  actionRow: { marginHorizontal: 12, marginVertical: 3 },
+  actionChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    alignSelf: "flex-start",
+    backgroundColor: "#161b22",
+    borderRadius: 10,
+    borderCurve: "continuous",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  actionTitle: { color: "#8b949e", fontSize: 13 },
+  actionGlyph: { color: "#8b949e", fontSize: 12, width: 16, textAlign: "center" },
   toolText: { color: "#8b949e", fontFamily: "monospace", fontSize: 11 },
   // Composer dock: absolute strip pinned above the keyboard by an animated
   // bottom offset.

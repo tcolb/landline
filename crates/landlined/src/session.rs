@@ -57,6 +57,20 @@ pub enum Ctl {
 /// One queued input write: bytes, optional client seq, receive time.
 pub type InputMsg = (Vec<u8>, Option<u64>, Instant);
 
+/// A chat item before the session assigns its id (see ChatItem for field
+/// meanings).
+#[derive(Debug, Default, Clone)]
+pub struct NewChatItem {
+    pub role: String,
+    pub kind: String,
+    pub text: String,
+    pub tool: Option<String>,
+    pub category: Option<String>,
+    pub title: Option<String>,
+    pub target: Option<String>,
+    pub call_id: Option<String>,
+}
+
 pub struct Session {
     pub info: Mutex<SessionInfo>,
     pub input_tx: xchan::Sender<InputMsg>,
@@ -88,13 +102,17 @@ pub struct Session {
 
 impl Session {
     /// Append a chat item and broadcast it (called by the chat tailer).
-    pub fn push_chat_item(&self, role: String, kind: String, text: String, tool: Option<String>) {
+    pub fn push_chat_item(&self, new: NewChatItem) {
         let item = ChatItem {
             id: self.chat_next_id.fetch_add(1, Relaxed) + 1,
-            role,
-            kind,
-            text,
-            tool,
+            role: new.role,
+            kind: new.kind,
+            text: new.text,
+            tool: new.tool,
+            category: new.category,
+            title: new.title,
+            target: new.target,
+            call_id: new.call_id,
         };
         self.chat_items.lock().unwrap().push(item.clone());
         let _ = self.chat_events.send(ChatEvent::Item(item));

@@ -129,12 +129,21 @@ fully replaces client state.
 ```json
 ← {"type": "chat_snapshot", "items": [ChatItem, …]}
 ← {"type": "chat_item", "item": {"id": 7, "role": "assistant",
-     "kind": "tool_use", "tool": "Bash", "text": "{\"command\":\"ls\"}"}}
+     "kind": "action", "tool": "Bash", "category": "command",
+     "title": "Run ls", "target": "ls", "call_id": "toolu_1",
+     "text": "{\"command\":\"ls\"}"}}
 ```
 
-`role`: user | assistant | tool | system. `kind`: text | tool_use |
-tool_result | event. Input/resize/detach behave exactly as in the other
-modes — chat input types into the same PTY the terminal views show.
+`role`: user | assistant | tool | system. `kind`: text | thinking |
+action | action_result | event. Actions are raw harness tool calls
+classified through the session's harness descriptor (DESIGN.md § Harness
+adapters): `category` is the semantic class (command | file_edit |
+file_read | search | subagent | web | other), `title` a short human line,
+`target` the primary object (path, command, url, agent type), `call_id`
+the harness id linking an `action_result` to its `action`; `text` keeps
+the raw input/output. All of these fields are optional (feature
+`chat-actions`, additive). Input/resize/detach behave exactly as in the
+other modes — chat input types into the same PTY the terminal views show.
 
 ### Client → server while attached (all modes)
 

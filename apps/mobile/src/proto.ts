@@ -63,10 +63,22 @@ export interface SessionInfo {
 /** One entry in a session's chat view. */
 export interface ChatItem {
   id: number;
-  role: "user" | "assistant" | "tool" | "system";
-  kind: "text" | "tool_use" | "tool_result" | "event";
+  /** "user" | "assistant" | "tool" | "system". */
+  role: string;
+  /** "text" | "thinking" | "action" | "action_result" | "event". */
+  kind: string;
   text: string;
+  /** Raw harness tool name for action items. */
   tool?: string;
+  /** Semantic action class: command | file_edit | file_read | search |
+   * subagent | web | other. */
+  category?: string;
+  /** Short human line for the action ("Edit src/main.rs"). */
+  title?: string;
+  /** The action's primary object: file path, command, url, agent type. */
+  target?: string;
+  /** Harness call id linking an action_result to its action. */
+  call_id?: string;
 }
 
 export interface SpawnRequest {

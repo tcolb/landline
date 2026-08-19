@@ -114,7 +114,8 @@ pub struct Template {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TemplateChat {
-    /// Transcript format/adapter: "claude" | "pi".
+    /// Harness adapter name (built-in "claude" | "pi", or a descriptor in
+    /// ~/.config/landline/harnesses/<name>.toml).
     pub format: String,
 }
 

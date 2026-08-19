@@ -221,8 +221,12 @@ script = (
     'mkdir -p "$TDIR"; sleep 1; '
     "echo '" + json.dumps({"type": "user", "message": {"role": "user", "content": "do the thing"}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 1; "
     "echo '" + json.dumps({"type": "assistant", "message": {"content": [
+        {"type": "thinking", "thinking": "let me think"},
         {"type": "text", "text": "done!"},
-        {"type": "tool_use", "name": "Bash", "input": {"command": "true"}}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 30"
+        {"type": "tool_use", "id": "t1", "name": "Edit",
+         "input": {"file_path": "/tmp/x.rs", "old_string": "a", "new_string": "b"}}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 1; "
+    "echo '" + json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]}}) + "' >> \"$TDIR/e2e.jsonl\"; sleep 30"
 )
 (ctpl / "chatty.toml").write_text(
     "[chat]\nformat = \"claude\"\n[harness]\ncmd = [\"sh\", \"-c\", " + json.dumps(script) + "]\n"
@@ -242,12 +246,20 @@ for msg in lines(a6, timeout=15):
         items.extend(msg["items"])
     elif msg["type"] == "chat_item":
         items.append(msg["item"])
-    if len(items) >= 3:
+    if len(items) >= 5:
         break
 kinds = [(i["role"], i["kind"]) for i in items]
-assert ("user", "text") in kinds and ("assistant", "text") in kinds and ("assistant", "tool_use") in kinds, kinds
-tool = next(i for i in items if i["kind"] == "tool_use")
-assert tool["tool"] == "Bash", tool
+assert ("user", "text") in kinds and ("assistant", "text") in kinds, kinds
+assert ("assistant", "thinking") in kinds and ("assistant", "action") in kinds, kinds
+assert ("tool", "action_result") in kinds, kinds
+action = next(i for i in items if i["kind"] == "action")
+assert action["tool"] == "Edit", action
+assert action["category"] == "file_edit", action
+assert action["title"] == "Edit /tmp/x.rs", action
+assert action["target"] == "/tmp/x.rs", action
+assert action["call_id"] == "t1", action
+result = next(i for i in items if i["kind"] == "action_result")
+assert result["call_id"] == "t1", result
 print("chat view ok:", kinds)
 a6.close()
 s = conn(); rpc(s, {"type": "kill", "session": "chatty"}); next(lines(s)); s.close()

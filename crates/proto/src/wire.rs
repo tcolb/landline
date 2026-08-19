@@ -22,6 +22,7 @@ pub const FEATURES: &[&str] = &[
     "chat",
     "stats",
     "input-seq",
+    "chat-actions",
 ];
 
 /// Base64 (standard alphabet, padded) serde adapter for binary payloads.
@@ -264,12 +265,25 @@ pub struct ChatItem {
     pub id: u64,
     /// "user" | "assistant" | "tool" | "system".
     pub role: String,
-    /// "text" | "tool_use" | "tool_result" | "event".
+    /// "text" | "thinking" | "action" | "action_result" | "event".
     pub kind: String,
     pub text: String,
-    /// Tool name for tool_use items.
+    /// Raw harness tool name for action items.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
+    /// Semantic action class: "command" | "file_edit" | "file_read" |
+    /// "search" | "subagent" | "web" | "other".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Short human line for the action ("Edit src/main.rs").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The action's primary object: file path, command, url, agent type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    /// Harness call id linking an action_result to its action.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

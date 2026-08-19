@@ -320,6 +320,41 @@ resync by snapshot), different state type. Spawn-time env sanitation is
 mandatory — inherited harness markers (e.g. nested-session flags) can
 silently disable the mirrors.
 
+### Harness adapters
+
+The chat mirror is split by what actually varies per harness:
+
+- **Parser families are code.** The structural shape of a transcript line
+  ("claude-jsonl", "pi-jsonl") is a Rust function; a new *shape* is a new
+  family.
+- **Everything else is data.** A harness descriptor (TOML) names the
+  transcript location (`dir` template with `{home}`/`{cwd_slug}`) and a
+  rule table classifying raw tool calls into semantic actions:
+
+  ```toml
+  name = "claude"
+  [transcript]
+  format = "claude-jsonl"
+  dir = "{home}/.claude/projects/{cwd_slug}"
+
+  [[action]]
+  tool = "Edit"
+  category = "file_edit"          # command | file_edit | file_read |
+  title = "Edit {input.file_path}" #   search | subagent | web | other
+  target = "input.file_path"
+  ```
+
+  `title` supports `{input.<dotted.path>[:maxlen]}` substitution from the
+  tool's input object. Built-in descriptors (claude, pi) ship compiled
+  in; `~/.config/landline/harnesses/<name>.toml` adds a new harness or
+  shadows a built-in without touching Rust. Unmatched tools degrade to
+  `category = "other"` with the tool name as title — never dropped.
+
+This is what feeds the chat view's activity feedback: thinking blocks,
+classified action chips (file edits, commands, subagent spawns, web
+lookups) with linked results, alongside the prose. Wire shape:
+PROTOCOL.md § chat mode.
+
 ### Repo-centric workspaces
 
 "Spin up claude for a repo" is the primary flow; a fixed directory in a
