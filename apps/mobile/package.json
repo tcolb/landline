@@ -1,6 +1,6 @@
 {
   "name": "landline-mobile",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "main": "index.ts",
   "dependencies": {
     "@expo/ui": "~57.0.11",
