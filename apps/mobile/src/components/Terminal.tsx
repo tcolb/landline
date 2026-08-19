@@ -101,6 +101,7 @@ function getFontInfo(): FontInfo {
 }
 
 const paintCache = new Map<string, ReturnType<typeof Skia.Paint>>();
+/** Text paint: antialiased. */
 function paintFor(color: string) {
   let p = paintCache.get(color);
   if (!p) {
@@ -110,13 +111,17 @@ function paintFor(color: string) {
   }
   return p;
 }
-function shadePaintFor(color: string, alpha: number) {
-  const key = `${color}@${alpha}`;
+/** Fill paint for rects (backgrounds, blocks, cursor): antialiasing OFF.
+ * Cell rects sit on fractional x (fractional glyph advance); AA feathers
+ * each edge and adjacent feathered edges read as hairline seams. */
+function fillPaintFor(color: string, alpha?: number) {
+  const key = alpha === undefined ? `fill:${color}` : `fill:${color}@${alpha}`;
   let p = paintCache.get(key);
   if (!p) {
     p = Skia.Paint();
     p.setColor(Skia.Color(color));
-    p.setAlphaf(alpha);
+    p.setAntiAlias(false);
+    if (alpha !== undefined) p.setAlphaf(alpha);
     paintCache.set(key, p);
   }
   return p;
@@ -228,16 +233,31 @@ function recordRow(cells: CellData[]): SkPicture {
   const canvas = rec.beginRecording(
     Skia.XYWHRect(0, 0, Math.max(1, cells.length) * CELL_W, CELL_H),
   );
-  for (let x = 0; x < cells.length; x++) {
-    const c = cells[x];
-    const inverse = c.fl & FLAG_INVERSE;
-    const bg = inverse ? (c.fg ?? [201, 209, 217]) : c.bg;
-    if (bg) {
-      canvas.drawRect(
-        Skia.XYWHRect(x * CELL_W, 0, CELL_W, CELL_H),
-        paintFor(`rgb(${bg[0]},${bg[1]},${bg[2]})`),
-      );
+  // Backgrounds as run-length batches: one rect per same-color stretch, so
+  // adjacent colored cells share no interior edges (no hairline seams).
+  {
+    let bgStart = 0;
+    let bgColor: string | null = null;
+    const flushBg = (end: number) => {
+      if (bgColor !== null) {
+        canvas.drawRect(
+          Skia.XYWHRect(bgStart * CELL_W, 0, (end - bgStart) * CELL_W, CELL_H),
+          fillPaintFor(bgColor),
+        );
+      }
+    };
+    for (let x = 0; x < cells.length; x++) {
+      const c = cells[x];
+      const inverse = c.fl & FLAG_INVERSE;
+      const bg = inverse ? (c.fg ?? [201, 209, 217]) : c.bg;
+      const color = bg ? `rgb(${bg[0]},${bg[1]},${bg[2]})` : null;
+      if (color !== bgColor) {
+        flushBg(x);
+        bgColor = color;
+        bgStart = x;
+      }
     }
+    flushBg(cells.length);
   }
   let run = "";
   let runStart = 0;
@@ -269,8 +289,8 @@ function recordRow(cells: CellData[]): SkPicture {
     const t = c.t === "" ? " " : c.t;
     // Box-art blocks render as rects, not glyphs (no font seams).
     if (
-      drawBlockChar(canvas, t, x * CELL_W, 0, CELL_W, CELL_H, paintFor(color), (alpha) =>
-        shadePaintFor(color, alpha),
+      drawBlockChar(canvas, t, x * CELL_W, 0, CELL_W, CELL_H, fillPaintFor(color), (alpha) =>
+        fillPaintFor(color, alpha),
       )
     ) {
       flush();
@@ -372,7 +392,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
     if (cursor.current.visible) {
       canvas.drawRect(
         Skia.XYWHRect(cursor.current.x * CELL_W, cursor.current.y * CELL_H, CELL_W, CELL_H),
-        paintFor("rgba(201,209,217,0.55)"),
+        fillPaintFor("rgba(201,209,217,0.55)"),
       );
     }
     setPicture(rec.finishRecordingAsPicture());
