@@ -27,11 +27,12 @@ export function IconButton({ symbol, fallback, onPress, size = BAR_BUTTON_SIZE, 
     const modifiers = [
       m.buttonStyle(accent ? "glassProminent" : "glass"),
       m.buttonBorderShape("circle"),
-      // The glass pill sizes itself from label padding; pin the frame so
-      // every bar button lands on the same standard circle.
-      m.frame({ width: size, height: size }),
     ];
     if (accent) modifiers.push(m.tint("#238636"));
+    // The glass pill wraps the label plus system padding; pinning the
+    // LABEL's frame (a frame outside the button just boxes it) makes
+    // every bar button the same standard circle.
+    const labelFrame = [m.frame({ width: size * 0.5, height: size * 0.5 })];
     return (
       <SwiftUI.Host style={{ width: size, height: size }} colorScheme="dark">
         <SwiftUI.Button onPress={onPress} modifiers={modifiers}>
@@ -39,6 +40,7 @@ export function IconButton({ symbol, fallback, onPress, size = BAR_BUTTON_SIZE, 
             systemName={symbol as never}
             size={BAR_SYMBOL_SIZE}
             color={accent ? "#ffffff" : "#e6edf3"}
+            modifiers={labelFrame}
           />
         </SwiftUI.Button>
       </SwiftUI.Host>
