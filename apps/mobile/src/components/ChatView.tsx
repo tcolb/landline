@@ -71,7 +71,7 @@ const SEND_DIAMETER = 36;
 const SEND_GAP = BUBBLE_RADIUS - SEND_DIAMETER / 2;
 const INPUT_LINE = 24;
 const INPUT_MAX_LINES = 5;
-const INPUT_PAD_TOP = 14;
+const INPUT_PAD_TOP = 8;
 const INPUT_PAD_BOTTOM = SEND_DIAMETER + SEND_GAP + 4;
 
 function NativeComposer({
@@ -197,7 +197,9 @@ function DockedByController({ children }: { children: React.ReactNode }) {
     },
     [],
   );
-  const style = a.useAnimatedStyle(() => ({ bottom: h.value }));
+  // Clamp: the system curve can overshoot below zero at the end of a
+  // dismissal, which would drag the dock past the screen edge.
+  const style = a.useAnimatedStyle(() => ({ bottom: Math.max(0, h.value) }));
   const A = a.Animated.View;
   return <A style={[styles.dock, style]}>{children}</A>;
 }
@@ -206,7 +208,7 @@ function DockedByReanimated({ children }: { children: React.ReactNode }) {
   const a = anim!;
   const kb = a.useAnimatedKeyboard();
   const style = a.useAnimatedStyle(() => ({
-    bottom: kb.height.value,
+    bottom: Math.max(0, kb.height.value),
   }));
   const A = a.Animated.View;
   return <A style={[styles.dock, style]}>{children}</A>;
