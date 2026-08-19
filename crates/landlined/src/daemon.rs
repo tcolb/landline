@@ -13,8 +13,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::{Context, Result};
 use crossbeam_channel as xchan;
 use landline_proto::wire::{
-    AttachMode, FEATURES, Frame, PROTOCOL_VERSION, Request, Response, SessionEvent,
-    SessionEventKind, SessionInfo, SessionStatus, SpawnRequest,
+    AttachMode, EnvironmentInfo, FEATURES, Frame, PROTOCOL_VERSION, Request, Response,
+    SessionEvent, SessionEventKind, SessionInfo, SessionStatus, SpawnRequest, TemplateInfo,
+    TemplateParam,
 };
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{UnixListener, UnixStream};
@@ -298,6 +299,16 @@ pub async fn serve_client(mut client: Client, registry: Arc<Registry>) -> Result
                 };
                 client.send(&resp).await?;
             }
+            Request::Templates { cwd } => {
+                let resp =
+                    tokio::task::spawn_blocking(move || list_templates_response(cwd)).await?;
+                client.send(&resp).await?;
+            }
+            Request::Environments { cwd } => {
+                let resp =
+                    tokio::task::spawn_blocking(move || list_environments_response(cwd)).await?;
+                client.send(&resp).await?;
+            }
             Request::Input { .. } | Request::Resize { .. } | Request::Detach => {
                 client
                     .send(&Response::Error {
@@ -308,6 +319,76 @@ pub async fn serve_client(mut client: Client, registry: Arc<Registry>) -> Result
         }
     }
     Ok(())
+}
+
+fn list_templates_response(cwd: Option<String>) -> Response {
+    let project = cwd.map(std::path::PathBuf::from);
+    let templates = crate::config::list_templates(project.as_deref())
+        .into_iter()
+        .map(|(name, t)| {
+            let mut params: Vec<TemplateParam> = t
+                .params
+                .iter()
+                .map(|(pname, spec)| match spec {
+                    crate::config::ParamSpec::Bare(default) => TemplateParam {
+                        name: pname.clone(),
+                        default: Some(default.clone()),
+                        required: false,
+                    },
+                    crate::config::ParamSpec::Full { default, required } => TemplateParam {
+                        name: pname.clone(),
+                        default: default.clone(),
+                        required: *required,
+                    },
+                })
+                .collect();
+            params.sort_by(|a, b| a.name.cmp(&b.name));
+            let environment = if let Some(image) = &t.environment.image {
+                format!("container:{image}")
+            } else if let Some(name) = &t.environment.use_name {
+                format!("env:{name}")
+            } else {
+                "host".to_string()
+            };
+            let command = match &t.harness {
+                Some(h) => match (&h.use_name, &h.cmd) {
+                    (Some(name), _) => format!("use:{name}"),
+                    (None, Some(cmd)) => cmd.join(" "),
+                    (None, None) => "?".to_string(),
+                },
+                None => "?".to_string(),
+            };
+            TemplateInfo {
+                name,
+                description: t.description.clone(),
+                params,
+                environment,
+                command,
+            }
+        })
+        .collect();
+    Response::Templates { templates }
+}
+
+fn list_environments_response(cwd: Option<String>) -> Response {
+    let project = cwd.map(std::path::PathBuf::from);
+    let mut environments = vec![EnvironmentInfo {
+        name: "host".into(),
+        description: Some("run directly on the daemon host".into()),
+        kind: "host".into(),
+        image: None,
+    }];
+    environments.extend(
+        crate::config::list_environments(project.as_deref())
+            .into_iter()
+            .map(|(name, spec)| EnvironmentInfo {
+                name,
+                description: spec.description.clone(),
+                kind: spec.kind.clone(),
+                image: spec.image.clone(),
+            }),
+    );
+    Response::Environments { environments }
 }
 
 fn do_spawn(registry: &Arc<Registry>, req: &SpawnRequest) -> Response {

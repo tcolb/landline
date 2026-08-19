@@ -17,6 +17,8 @@ pub const FEATURES: &[&str] = &[
     "bytes",
     "watch",
     "templates",
+    "template-list",
+    "environment-list",
     "stats",
     "input-seq",
 ];
@@ -142,6 +144,18 @@ pub enum Request {
     Stats {
         session: String,
     },
+    /// List spawnable templates. `cwd` scopes in project-local templates
+    /// (`.landline/templates/`), which shadow user-level ones.
+    Templates {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
+    /// List selectable environments (the overridable second dimension of a
+    /// spawn: agent × environment).
+    Environments {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+    },
 }
 
 /// Daemon → client.
@@ -179,9 +193,52 @@ pub enum Response {
     Stats {
         stats: serde_json::Value,
     },
+    /// Reply to `Templates`.
+    Templates {
+        templates: Vec<TemplateInfo>,
+    },
+    /// Reply to `Environments`.
+    Environments {
+        environments: Vec<EnvironmentInfo>,
+    },
     Exited {
         code: Option<i32>,
     },
+}
+
+/// A spawnable template, as shown in pickers. Templates are the primary
+/// spawn surface (agent-first design); resolution stays daemon-side.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub params: Vec<TemplateParam>,
+    /// Environment summary, e.g. "host", "container:ubuntu", "env:gpu-box".
+    pub environment: String,
+    /// Harness summary, e.g. "claude" or "use:claude-profile".
+    pub command: String,
+}
+
+/// A selectable environment. "host" is always present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnvironmentInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// "host" | "container".
+    pub kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TemplateParam {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<String>,
+    #[serde(default)]
+    pub required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

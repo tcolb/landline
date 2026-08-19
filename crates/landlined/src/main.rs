@@ -69,6 +69,10 @@ enum Command {
     Ls,
     /// Print a session's pipeline statistics (docs/PROFILING.md).
     Stats { session: String },
+    /// List spawnable templates (project .landline/ shadows user config).
+    Templates,
+    /// List selectable environments.
+    Environments,
     /// Kill a session by id or name.
     Kill { session: String },
     /// Attach to a session by id or name. Detach with Ctrl-\.
@@ -155,6 +159,60 @@ fn main() -> Result<()> {
                             s.cols,
                             s.rows,
                             s.cmd.join(" ")
+                        );
+                    }
+                    Ok(())
+                }
+                other => fail(other),
+            }
+        }
+        Command::Templates => {
+            let cwd = std::env::current_dir()
+                .ok()
+                .map(|d| d.display().to_string());
+            let mut stream = connect_or_start(&socket)?;
+            match roundtrip(&mut stream, &Request::Templates { cwd })? {
+                Response::Templates { templates } => {
+                    for t in templates {
+                        let params: Vec<String> = t
+                            .params
+                            .iter()
+                            .map(|p| {
+                                if p.required {
+                                    format!("{}*", p.name)
+                                } else {
+                                    p.name.clone()
+                                }
+                            })
+                            .collect();
+                        println!(
+                            "{}	{}	{}	[{}]	{}",
+                            t.name,
+                            t.environment,
+                            t.command,
+                            params.join(", "),
+                            t.description.as_deref().unwrap_or("")
+                        );
+                    }
+                    Ok(())
+                }
+                other => fail(other),
+            }
+        }
+        Command::Environments => {
+            let cwd = std::env::current_dir()
+                .ok()
+                .map(|d| d.display().to_string());
+            let mut stream = connect_or_start(&socket)?;
+            match roundtrip(&mut stream, &Request::Environments { cwd })? {
+                Response::Environments { environments } => {
+                    for e in environments {
+                        println!(
+                            "{}	{}	{}	{}",
+                            e.name,
+                            e.kind,
+                            e.image.as_deref().unwrap_or("-"),
+                            e.description.as_deref().unwrap_or("")
                         );
                     }
                     Ok(())

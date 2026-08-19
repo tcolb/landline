@@ -271,6 +271,28 @@ Rules:
 - Later, not core: consuming `devcontainer.json` as an environment source for
   docker environments.
 
+## Agent-first, not multiplexer-first
+
+landline is an agent session runtime that happens to render terminals —
+not a terminal multiplexer with agents bolted on. Practically:
+
+- **Templates are the primary spawn surface.** Spawning means picking an
+  agent preset (template) and filling its parameters; clients render a
+  picker fed by the `templates` protocol request. Inline commands remain
+  as the debug escape hatch, tucked behind "advanced".
+- **Agent and environment are independent, both selectable.** A template
+  names the agent (and a default environment), but the spawn surface
+  exposes environment as an overridable second dimension fed by the
+  `environments` request — "run webapp-fix, but in the ubuntu container
+  this time" without minting a new template. Spawn precedence:
+  `image` > named `env` > template environment > host.
+- Sessions are described by intent (which agent, which repo, which
+  branch), not by command lines; the registry system (environments,
+  harnesses, templates) is where that intent lives.
+- Future orchestration (M6: spawn/send/wait, state detection) builds on
+  the same template identity: an agent spawning a helper names a template,
+  not a shell command.
+
 ## Responsiveness budget
 
 "Feels instant" is a measured budget, not a vibe. Targets:

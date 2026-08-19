@@ -48,6 +48,36 @@ export function useSessions(cfg: ConnectionConfig) {
   return query;
 }
 
+export function useTemplates(cfg: ConnectionConfig) {
+  return useQuery({
+    queryKey: ["templates", cfg.host],
+    queryFn: async () => {
+      const conn = await ControlConn.open(cfg);
+      try {
+        return await conn.templates();
+      } finally {
+        conn.close();
+      }
+    },
+    staleTime: 60_000,
+  });
+}
+
+export function useEnvironments(cfg: ConnectionConfig) {
+  return useQuery({
+    queryKey: ["environments", cfg.host],
+    queryFn: async () => {
+      const conn = await ControlConn.open(cfg);
+      try {
+        return await conn.environments();
+      } finally {
+        conn.close();
+      }
+    },
+    staleTime: 60_000,
+  });
+}
+
 export async function killSession(cfg: ConnectionConfig, session: string) {
   const conn = await ControlConn.open(cfg);
   try {

@@ -50,6 +50,8 @@ rest of the connection. Open one connection per concern.
 | `{"type": "attach", "session": ID_OR_NAME, "mode": "frames" \| "bytes"}` | → attached state |
 | `{"type": "watch"}` | `ok`, then → watching state |
 | `{"type": "stats", "session": ID_OR_NAME}` | `stats` (counters/histograms; see docs/PROFILING.md) |
+| `{"type": "templates", "cwd": PATH?}` | `templates` — spawnable templates (name, description, params with defaults/required, environment and harness summaries). `cwd` scopes in project-local `.landline/templates/`, which shadow user-level ones. Templates are the primary spawn surface (agent-first design). |
+| `{"type": "environments", "cwd": PATH?}` | `environments` — selectable environments (name, description, kind, image); "host" is always present. Spawning with `env` overrides the template's environment: agent and environment are independent dimensions. |
 
 `SpawnRequest`:
 

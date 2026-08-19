@@ -179,6 +179,37 @@ assert d["vt_diff_us"]["count"] >= 1, d
 print("stats ok:", {k: d[k] for k in ("inputs", "frames", "frames_immediate", "frames_coalesced")})
 s.close()
 
+# 5c. template discovery
+import pathlib
+tdir = pathlib.Path(os.environ["LANDLINE_CONFIG_DIR"]) / "templates"
+tdir.mkdir(parents=True, exist_ok=True)
+(tdir / "e2e-agent.toml").write_text(
+    'description = "e2e agent"\n'
+    '[params]\n'
+    'mode = { default = "fast" }\n'
+    'branch = { required = true }\n'
+    '[harness]\n'
+    'cmd = ["bash", "-lc", "echo TEMPLATED"]\n'
+)
+s5 = conn()
+rpc(s5, {"type": "templates"})
+tl = next(lines(s5))
+assert tl["type"] == "templates", tl
+entry = next(t for t in tl["templates"] if t["name"] == "e2e-agent")
+assert entry["description"] == "e2e agent", entry
+pnames = {p["name"]: p for p in entry["params"]}
+assert pnames["mode"]["default"] == "fast" and not pnames["mode"]["required"]
+assert pnames["branch"]["required"]
+assert entry["command"].startswith("bash"), entry
+print("templates list ok:", [t["name"] for t in tl["templates"]])
+rpc(s5, {"type": "environments"})
+el = next(lines(s5))
+assert el["type"] == "environments", el
+names = [e["name"] for e in el["environments"]]
+assert names[0] == "host", names
+print("environments list ok:", names)
+s5.close()
+
 # 6. watch: lifecycle events for a short-lived session, plus hooks
 wch = conn()
 rpc(wch, {"type": "watch"})

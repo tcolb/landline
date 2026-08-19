@@ -70,6 +70,29 @@ export interface SpawnRequest {
   cols: number;
 }
 
+/** A spawnable template (agent-first: the primary spawn surface). */
+export interface TemplateInfo {
+  name: string;
+  description?: string;
+  params: TemplateParam[];
+  environment: string;
+  command: string;
+}
+
+/** A selectable environment — the overridable second spawn dimension. */
+export interface EnvironmentInfo {
+  name: string;
+  description?: string;
+  kind: string;
+  image?: string;
+}
+
+export interface TemplateParam {
+  name: string;
+  default?: string;
+  required: boolean;
+}
+
 export interface SessionEvent {
   kind: "created" | "exited";
   info: SessionInfo;
@@ -85,7 +108,9 @@ export type Request =
   | { type: "input"; data: string; seq?: number } // base64
   | { type: "resize"; rows: number; cols: number }
   | { type: "detach" }
-  | { type: "stats"; session: string };
+  | { type: "stats"; session: string }
+  | { type: "templates"; cwd?: string }
+  | { type: "environments"; cwd?: string };
 
 export type Response =
   | { type: "ok" }
@@ -97,6 +122,8 @@ export type Response =
   | { type: "bytes"; data: string } // base64
   | { type: "event"; event: SessionEvent }
   | { type: "stats"; stats: Record<string, unknown> }
+  | { type: "templates"; templates: TemplateInfo[] }
+  | { type: "environments"; environments: EnvironmentInfo[] }
   | { type: "exited"; code: number | null };
 
 // Base64 helpers, dependency-free (Hermes has atob/btoa, but UTF-8 needs

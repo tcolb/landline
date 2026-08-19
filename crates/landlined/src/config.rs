@@ -16,6 +16,8 @@ use serde::Deserialize;
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct EnvironmentSpec {
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(rename = "type", default = "default_env_type")]
     pub kind: String, // "host" | "container"
     /// Container runtime: "docker" | "podman" | "auto" (default).
@@ -235,6 +237,75 @@ fn load_registry_entry<T: serde::de::DeserializeOwned>(
         "no {kind} named '{name}' (looked in .landline/{kind}/ and {}/{kind}/)",
         user_config_dir().display()
     )
+}
+
+/// Enumerate templates: user-level, then project-local shadowing by name.
+/// Unparseable files are skipped with a warning, not fatal — one bad file
+/// must not empty the picker.
+pub fn list_templates(project_dir: Option<&Path>) -> Vec<(String, Template)> {
+    let mut out: std::collections::BTreeMap<String, Template> = std::collections::BTreeMap::new();
+    let mut scan = |dir: PathBuf| {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let parsed = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| toml::from_str::<Template>(&raw).ok());
+            match parsed {
+                Some(t) => {
+                    out.insert(name.to_string(), t);
+                }
+                None => tracing::warn!("skipping unparseable template {}", path.display()),
+            }
+        }
+    };
+    scan(user_config_dir().join("templates"));
+    if let Some(project) = project_dir {
+        scan(project.join(".landline").join("templates"));
+    }
+    out.into_iter().collect()
+}
+
+/// Enumerate named environments (project shadows user), like templates.
+pub fn list_environments(project_dir: Option<&Path>) -> Vec<(String, EnvironmentSpec)> {
+    let mut out: std::collections::BTreeMap<String, EnvironmentSpec> =
+        std::collections::BTreeMap::new();
+    let mut scan = |dir: PathBuf| {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                continue;
+            }
+            let Some(name) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let parsed = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| toml::from_str::<EnvironmentSpec>(&raw).ok());
+            match parsed {
+                Some(spec) => {
+                    out.insert(name.to_string(), spec);
+                }
+                None => tracing::warn!("skipping unparseable environment {}", path.display()),
+            }
+        }
+    };
+    scan(user_config_dir().join("environments"));
+    if let Some(project) = project_dir {
+        scan(project.join(".landline").join("environments"));
+    }
+    out.into_iter().collect()
 }
 
 pub fn load_environment(name: &str, project_dir: &Path) -> Result<EnvironmentSpec> {

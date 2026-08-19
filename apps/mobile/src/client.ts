@@ -10,7 +10,9 @@ import {
   Request,
   Response,
   SessionEvent,
+  EnvironmentInfo,
   SpawnRequest,
+  TemplateInfo,
 } from "./proto";
 import { stats } from "./stats";
 
@@ -85,6 +87,18 @@ export class ControlConn {
     const r = await this.request({ type: "spawn", spawn });
     if (r.type !== "spawned") throw new Error(errText(r));
     return r.info;
+  }
+
+  async templates(): Promise<TemplateInfo[]> {
+    const r = await this.request({ type: "templates" });
+    if (r.type !== "templates") throw new Error(errText(r));
+    return r.templates;
+  }
+
+  async environments(): Promise<EnvironmentInfo[]> {
+    const r = await this.request({ type: "environments" });
+    if (r.type !== "environments") throw new Error(errText(r));
+    return r.environments;
   }
 
   async kill(session: string) {
