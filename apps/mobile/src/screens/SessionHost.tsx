@@ -5,7 +5,7 @@
 
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
 import { ChatView } from "../components/ChatView";
 import { DrawerScrim } from "../components/DrawerScrim";
@@ -48,10 +48,13 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
 
 export function SessionHost({ cfg, openDrawer }: Props) {
   const { selection, view } = useSelection();
+  // Inset padding, not SafeAreaView: SafeAreaView re-measures during the
+  // drawer's slide animation and visibly jumps.
+  const insets = useSafeAreaInsets();
 
   const activeView = selection?.chat && view === "chat" ? "chat" : "terminal";
   return (
-    <SafeAreaView style={styles.root} edges={["top"]}>
+    <View style={[styles.root, { paddingTop: insets.top }]}>
       <TopBar openDrawer={openDrawer} />
       {selection === null ? (
         <View style={styles.emptyWrap}>
@@ -66,7 +69,7 @@ export function SessionHost({ cfg, openDrawer }: Props) {
         <Terminal cfg={cfg} session={selection.id} onBack={openDrawer} showBack={false} />
       )}
       <DrawerScrim />
-    </SafeAreaView>
+    </View>
   );
 }
 
