@@ -19,7 +19,6 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
-  LayoutAnimation,
   Platform,
   Pressable,
   StyleSheet,
@@ -67,10 +66,6 @@ const nativeComposer = SwiftUI !== null && SwiftUIModifiers !== null && anim !==
  * no cross-framework seam frames. SwiftUI is decoration only: the glass
  * fill and the fixed-size send circle, neither of which is ever measured.
  * Send seat is concentric by construction: gap = R - D/2. */
-/** A/B diagnostic: solid bubble to separate real geometry changes from
- * background motion showing through the glass. */
-const DEBUG_OPAQUE_BUBBLE = true;
-
 const BUBBLE_RADIUS = 26;
 const SEND_DIAMETER = 36;
 const SEND_GAP = BUBBLE_RADIUS - SEND_DIAMETER / 2;
@@ -97,7 +92,6 @@ function NativeComposer({
   // Fabric's onContentSizeChange is unreliable — a hidden Text twin with
   // identical metrics measures the draft instead.
   const onMeasure = (h: number) => {
-    console.log(`[cmp] measure h=${h} editing=${editing.current} contentH=${contentH}`);
     if (editing.current) setContentH(Math.ceil(h));
   };
   const send = () => {
@@ -114,14 +108,8 @@ function NativeComposer({
 
   const inputH = Math.min(INPUT_MAX_LINES * INPUT_LINE, Math.max(INPUT_LINE, contentH));
   const bubbleH = INPUT_PAD_TOP + inputH + INPUT_PAD_BOTTOM;
-  console.log(
-    `[cmp] render padTop=${INPUT_PAD_TOP} contentH=${contentH} inputH=${inputH} bubbleH=${bubbleH} draftLen=${draft.length}`,
-  );
   return (
     <View style={{ height: bubbleH }}>
-      {DEBUG_OPAQUE_BUBBLE ? (
-        <View style={[StyleSheet.absoluteFill, styles.debugOpaque]} />
-      ) : (
       <S.Host style={StyleSheet.absoluteFill} colorScheme="dark" pointerEvents="none">
         <S.HStack
           modifiers={[
@@ -136,22 +124,15 @@ function NativeComposer({
           <S.Spacer />
         </S.HStack>
       </S.Host>
-      )}
-      {/* Clipping wrapper: the field renders a new wrapped line one commit
-          before the measured height lands, and Fabric's field does not clip
-          its own overflow. */}
-      <View style={[styles.inputClip, { height: inputH }]}>
       <TextInput
         ref={input}
         style={[styles.nativeInput, { height: inputH }]}
         value={draft}
         onChangeText={setDraft}
         onFocus={() => {
-          console.log("[cmp] focus");
           editing.current = true;
         }}
         onBlur={() => {
-          console.log("[cmp] blur");
           editing.current = false;
         }}
         placeholder={`Ask ${agentName}`}
@@ -161,7 +142,6 @@ function NativeComposer({
         autoCapitalize="none"
         autoCorrect
       />
-      </View>
       {/* Invisible measurer: same font, line height, and wrap width as the
           input (UITextView adds 5pt line-fragment padding per side, mirrored
           here) — its layout height is the input's content height. */}
@@ -202,10 +182,6 @@ function DockedByController({ children }: { children: React.ReactNode }) {
   const h = a.useSharedValue!(0);
   kbc!.useKeyboardHandler(
     {
-      onStart: (e) => {
-        "worklet";
-        console.log(`[dock] start h=${e.height}`);
-      },
       onMove: (e) => {
         "worklet";
         h.value = e.height;
@@ -216,7 +192,6 @@ function DockedByController({ children }: { children: React.ReactNode }) {
       },
       onEnd: (e) => {
         "worklet";
-        console.log(`[dock] end h=${e.height}`);
         h.value = e.height;
       },
     },
@@ -300,23 +275,11 @@ export function ChatView({ cfg, session }: Props) {
   // composer.
   useEffect(() => {
     if (Platform.OS !== "ios" || !nativeComposer) return;
-    // Animate the clearance with the keyboard curve: an instant padding
-    // jump moves the messages behind the translucent glass mid-transition,
-    // which reads as the bubble deforming.
-    const kbCurve = (duration: number) =>
-      LayoutAnimation.configureNext({
-        duration: Math.max(120, duration),
-        update: { type: "keyboard" },
-      });
     const show = Keyboard.addListener("keyboardWillShow", (e) => {
-      kbCurve(e.duration ?? 250);
       setKbClearance(e.endCoordinates.height);
       requestAnimationFrame(() => list.current?.scrollToEnd({ animated: true }));
     });
-    const hide = Keyboard.addListener("keyboardWillHide", (e) => {
-      kbCurve(e.duration ?? 250);
-      setKbClearance(0);
-    });
+    const hide = Keyboard.addListener("keyboardWillHide", () => setKbClearance(0));
     return () => {
       show.remove();
       hide.remove();
@@ -470,19 +433,11 @@ const styles = StyleSheet.create({
     bottom: 0,
     paddingBottom: 10,
   },
-  debugOpaque: { backgroundColor: "#1a1a1a", borderRadius: BUBBLE_RADIUS },
-  inputClip: {
+  nativeInput: {
     position: "absolute",
     top: INPUT_PAD_TOP,
     left: 16,
     right: 16,
-    overflow: "hidden",
-  },
-  nativeInput: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
     color: "#e6edf3",
     backgroundColor: "transparent",
     fontSize: 18,
