@@ -92,6 +92,7 @@ function NativeComposer({
   // Fabric's onContentSizeChange is unreliable — a hidden Text twin with
   // identical metrics measures the draft instead.
   const onMeasure = (h: number) => {
+    console.log(`[cmp] measure h=${h} editing=${editing.current} contentH=${contentH}`);
     if (editing.current) setContentH(Math.ceil(h));
   };
   const send = () => {
@@ -108,6 +109,9 @@ function NativeComposer({
 
   const inputH = Math.min(INPUT_MAX_LINES * INPUT_LINE, Math.max(INPUT_LINE, contentH));
   const bubbleH = INPUT_PAD_TOP + inputH + INPUT_PAD_BOTTOM;
+  console.log(
+    `[cmp] render padTop=${INPUT_PAD_TOP} contentH=${contentH} inputH=${inputH} bubbleH=${bubbleH} draftLen=${draft.length}`,
+  );
   return (
     <View style={{ height: bubbleH }}>
       <S.Host style={StyleSheet.absoluteFill} colorScheme="dark" pointerEvents="none">
@@ -130,9 +134,11 @@ function NativeComposer({
         value={draft}
         onChangeText={setDraft}
         onFocus={() => {
+          console.log("[cmp] focus");
           editing.current = true;
         }}
         onBlur={() => {
+          console.log("[cmp] blur");
           editing.current = false;
         }}
         placeholder={`Ask ${agentName}`}
@@ -182,6 +188,10 @@ function DockedByController({ children }: { children: React.ReactNode }) {
   const h = a.useSharedValue!(0);
   kbc!.useKeyboardHandler(
     {
+      onStart: (e) => {
+        "worklet";
+        console.log(`[dock] start h=${e.height}`);
+      },
       onMove: (e) => {
         "worklet";
         h.value = e.height;
@@ -192,6 +202,7 @@ function DockedByController({ children }: { children: React.ReactNode }) {
       },
       onEnd: (e) => {
         "worklet";
+        console.log(`[dock] end h=${e.height}`);
         h.value = e.height;
       },
     },
@@ -276,10 +287,14 @@ export function ChatView({ cfg, session }: Props) {
   useEffect(() => {
     if (Platform.OS !== "ios" || !nativeComposer) return;
     const show = Keyboard.addListener("keyboardWillShow", (e) => {
+      console.log(`[cmp] kbWillShow h=${e.endCoordinates.height}`);
       setKbClearance(e.endCoordinates.height);
       requestAnimationFrame(() => list.current?.scrollToEnd({ animated: true }));
     });
-    const hide = Keyboard.addListener("keyboardWillHide", () => setKbClearance(0));
+    const hide = Keyboard.addListener("keyboardWillHide", () => {
+      console.log("[cmp] kbWillHide");
+      setKbClearance(0);
+    });
     return () => {
       show.remove();
       hide.remove();
