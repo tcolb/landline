@@ -8,12 +8,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Constants from "expo-constants";
 import { StatusBar } from "expo-status-bar";
 import React, { useEffect, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Dimensions, ScrollView, StyleSheet, Text } from "react-native";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionConfig } from "./src/client";
 import { drawerKit } from "./src/drawer-nav";
 import { useScreenRadius } from "./src/screen-radius";
-import { IconButton } from "./src/components/IconButton";
 import { ConnectScreen } from "./src/screens/ConnectScreen";
 import { useSelection } from "./src/selection";
 import { SessionDrawer } from "./src/screens/SessionDrawer";
@@ -35,44 +34,7 @@ export type RootStackParams = {
 const Stack = createNativeStackNavigator<RootStackParams>();
 export const navigationRef = createNavigationContainerRef<RootStackParams>();
 const Drawer = drawerKit ? drawerKit.createDrawerNavigator() : null;
-/** Nested stack inside the drawer scene so the session bar is the REAL
- * UINavigationBar, not a faked View row. */
-const SessionStack = createNativeStackNavigator();
 
-/** Header title view: terminal|chat segmented control for hybrid
- * sessions, otherwise the session name. Lives in the native bar. */
-function HeaderToggle() {
-  const { selection, view, setView } = useSelection();
-  if (!selection) return <Text style={hdrStyles.title}>landline</Text>;
-  if (!selection.chat) return <Text style={hdrStyles.title}>{selection.id}</Text>;
-  return (
-    <View style={hdrStyles.segments}>
-      {(["terminal", "chat"] as const).map((v) => (
-        <Pressable
-          key={v}
-          style={[hdrStyles.segment, view === v && hdrStyles.segmentActive]}
-          onPress={() => setView(v)}
-        >
-          <Text style={view === v ? hdrStyles.segTextActive : hdrStyles.segText}>{v}</Text>
-        </Pressable>
-      ))}
-    </View>
-  );
-}
-
-const hdrStyles = StyleSheet.create({
-  title: { color: "#c9d1d9", fontSize: 15, fontWeight: "600" },
-  segments: {
-    flexDirection: "row",
-    backgroundColor: "#141414",
-    borderRadius: 8,
-    padding: 2,
-  },
-  segment: { paddingHorizontal: 14, paddingVertical: 4, borderRadius: 6 },
-  segmentActive: { backgroundColor: "#2a2a2a" },
-  segText: { color: "#8b949e", fontSize: 13 },
-  segTextActive: { color: "#c9d1d9", fontSize: 13, fontWeight: "600" },
-});
 
 /** Claude-app-style layout: main scene slides right revealing the session
  * drawer; the displaced scene keeps a rounded, bordered edge. */
@@ -94,7 +56,12 @@ function DrawerMain({
         // Scrim lives INSIDE the scene (DrawerScrim) so it clips to the
         // card's corner radius; the built-in overlay bleeds past it.
         overlayColor: "transparent",
-        drawerStyle: { backgroundColor: "#000000", width: 200 },
+        // Sized so the session card peeking on the right is a slim
+        // quarter-screen slice.
+        drawerStyle: {
+          backgroundColor: "#000000",
+          width: Math.round(Dimensions.get("window").width * 0.75),
+        },
         sceneStyle: {
           backgroundColor: "#000000",
           // Matches the device's physical display corner radius (same
@@ -123,27 +90,7 @@ function DrawerMain({
     >
       <D.Screen name="Session">
         {(props: any) => (
-          <SessionStack.Navigator>
-            <SessionStack.Screen
-              name="SessionBar"
-              options={{
-                headerStyle: { backgroundColor: "#000000" },
-                headerShadowVisible: false,
-                headerTitle: () => <HeaderToggle />,
-                headerLeft: () => (
-                  <IconButton
-                    symbol="line.3.horizontal"
-                    fallback="☰"
-                    onPress={() => props.navigation.openDrawer()}
-                  />
-                ),
-              }}
-            >
-              {() => (
-                <SessionHost cfg={cfg} openDrawer={() => props.navigation.openDrawer()} />
-              )}
-            </SessionStack.Screen>
-          </SessionStack.Navigator>
+          <SessionHost cfg={cfg} openDrawer={() => props.navigation.openDrawer()} />
         )}
       </D.Screen>
     </D.Navigator>

@@ -20,7 +20,7 @@ export function IconButton({ symbol, fallback, onPress, size = 32, accent }: Pro
   const inner =
     SwiftUI !== null ? (
       <SwiftUI.Host
-        style={{ width: size * 0.55, height: size * 0.55 }}
+        style={{ width: size * 0.55, height: size * 0.55, backgroundColor: "transparent" }}
         colorScheme="dark"
         pointerEvents="none"
       >

@@ -318,9 +318,11 @@ interface Props {
   cfg: ConnectionConfig;
   session: string;
   onBack(): void;
+  /** Hide the internal back button (a host bar already provides nav). */
+  showBack?: boolean;
 }
 
-export function Terminal({ cfg, session, onBack }: Props) {
+export function Terminal({ cfg, session, onBack, showBack = true }: Props) {
   const [picture, setPicture] = useState<SkPicture | null>(null);
   const [status, setStatus] = useState("connecting…");
   const [echoMs, setEchoMs] = useState<number | null>(null);
@@ -654,9 +656,11 @@ export function Terminal({ cfg, session, onBack }: Props) {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <View style={styles.bar}>
-        <Pressable onPress={onBack} style={styles.key}>
-          <Text style={styles.keyText}>‹ back</Text>
-        </Pressable>
+        {showBack && (
+          <Pressable onPress={onBack} style={styles.key}>
+            <Text style={styles.keyText}>‹ back</Text>
+          </Pressable>
+        )}
         <Pressable style={styles.overlayWrap} onPress={() => setShowStats((v) => !v)}>
           <Text style={styles.overlay}>
             {session} · {cols}×{rows} · {getFontInfo().family}

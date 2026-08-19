@@ -1,16 +1,25 @@
 // The washed-out treatment of the displaced scene, rendered INSIDE the
 // scene so it clips to the card's corner radius (the drawer's built-in
 // overlay sits outside the rounded container and bleeds past the
-// corners). Opacity tracks drawer progress on the UI thread.
+// corners). The wash is a left-weighted gradient — strongest at the edge
+// meeting the drawer, gone by ~2/3 across — plus a hairline card border
+// that only exists while the card is displaced. Opacity tracks drawer
+// progress on the UI thread.
 
+import { Canvas, LinearGradient, Rect, vec } from "@shopify/react-native-skia";
 import React from "react";
-import { StyleSheet } from "react-native";
+import { Dimensions, StyleSheet } from "react-native";
 import { useScreenRadius } from "../screen-radius";
 
 const kit: {
   useDrawerProgress: () => { value: number };
   Animated: any;
   useAnimatedStyle: (fn: () => object) => object;
+  useAnimatedReaction: (
+    prepare: () => number,
+    react: (value: number, previous: number | null) => void,
+  ) => void;
+  runOnJS: (fn: (...args: any[]) => void) => (...args: any[]) => void;
 } | null = (() => {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -22,18 +31,47 @@ const kit: {
       useDrawerProgress: drawer.useDrawerProgress,
       Animated: reanimated.default,
       useAnimatedStyle: reanimated.useAnimatedStyle,
+      useAnimatedReaction: reanimated.useAnimatedReaction,
+      runOnJS: reanimated.runOnJS,
     };
   } catch {
     return null;
   }
 })();
 
+/** Light impact when the drawer settles open or closed. Guarded: no-op
+ * on binaries built before expo-haptics was added. */
+const settleHaptic = (() => {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const haptics = require("expo-haptics");
+    return () => {
+      haptics.impactAsync(haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    };
+  } catch {
+    return () => {};
+  }
+})();
+
 function Scrim() {
   const k = kit!;
   const radius = useScreenRadius();
+  const { width, height } = Dimensions.get("window");
   const progress = k.useDrawerProgress();
+  // Fire once when the drawer settles at either end (dock/undock release),
+  // not on mount and not mid-drag.
+  k.useAnimatedReaction(
+    () => progress.value ?? 0,
+    (value, previous) => {
+      "worklet";
+      if (previous === null || previous === value) return;
+      if ((value === 1 && previous < 1) || (value === 0 && previous > 0)) {
+        k.runOnJS(settleHaptic)();
+      }
+    },
+  );
   const fillStyle = k.useAnimatedStyle(() => ({
-    opacity: (progress.value ?? 0) * 0.08,
+    opacity: progress.value ?? 0,
   }));
   // Border ramps in fast: any displacement at all shows the card edge,
   // fully invisible only at rest.
@@ -51,7 +89,17 @@ function Scrim() {
   };
   return (
     <>
-      <A pointerEvents="none" style={[fill, { backgroundColor: "#ffffff" }, fillStyle]} />
+      <A pointerEvents="none" style={[fill, fillStyle]}>
+        <Canvas style={{ flex: 1 }}>
+          <Rect x={0} y={0} width={width} height={height}>
+            <LinearGradient
+              start={vec(0, 0)}
+              end={vec(width * 0.66, 0)}
+              colors={["rgba(255,255,255,0.07)", "rgba(255,255,255,0)"]}
+            />
+          </Rect>
+        </Canvas>
+      </A>
       <A
         pointerEvents="none"
         style={[
