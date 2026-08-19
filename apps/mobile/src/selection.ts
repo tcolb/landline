@@ -7,10 +7,14 @@ import { SessionSelection } from "./screens/SessionDrawer";
 
 interface SelectionState {
   selection: SessionSelection | null;
+  view: "terminal" | "chat";
   setSelection(sel: SessionSelection | null): void;
+  setView(view: "terminal" | "chat"): void;
 }
 
 export const useSelection = create<SelectionState>((set) => ({
   selection: null,
-  setSelection: (selection) => set({ selection }),
+  view: "terminal",
+  setSelection: (selection) => set({ selection, view: "terminal" }),
+  setView: (view) => set({ view }),
 }));
