@@ -695,14 +695,27 @@ export function Terminal({ cfg, session, onBack }: Props) {
               bestP = p;
             }
           }
-          const removed = best.length - bestP;
+          const removedSlice = best.slice(bestP);
           const added = t.slice(bestP).replaceAll("​", "");
           lastField.current = t;
           if (preReset.current !== null && t.startsWith(SENTINEL)) {
             preReset.current = null; // reset observed; stale window over
           }
+          // Removed typed chars map 1:1 to backspaces (they exist on the
+          // app's line). A multi-char removal of pure cushion is iOS's
+          // held-delete word acceleration chewing the zero-width run —
+          // the user's intent is "delete one word", so send word-erase
+          // (Ctrl-W) instead of a blind burst of backspaces.
+          let realRemoved = 0;
+          let zwRemoved = 0;
+          for (const ch of removedSlice) {
+            if (ch === "​") zwRemoved++;
+            else realRemoved++;
+          }
           let out = "";
-          if (removed > 0) out += "\x7f".repeat(removed);
+          if (realRemoved > 0) out += "\x7f".repeat(realRemoved);
+          if (zwRemoved === 1) out += "\x7f";
+          else if (zwRemoved > 1) out += "\x17";
           out += added;
           if (out !== "") sendText(out);
           // Replenish when the cushion runs low (deletions) or the field
