@@ -14,6 +14,8 @@ import {
   View,
 } from "react-native";
 import { AttachHandle, attachChat, ConnectionConfig } from "../client";
+import { IconButton } from "./IconButton";
+import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { ChatItem, inputMessage } from "../proto";
 
 interface Props {
@@ -119,19 +121,46 @@ export function ChatView({ cfg, session }: Props) {
         }
       />
       <View style={styles.inputRow}>
-        <TextInput
-          style={styles.input}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Message the agent…"
-          placeholderTextColor="#484f58"
-          multiline
-          autoCapitalize="none"
-          autoCorrect
-        />
-        <Pressable style={styles.sendBtn} onPress={sendDraft}>
-          <Text style={styles.sendText}>↑</Text>
-        </Pressable>
+        <View style={styles.inputWrap}>
+          {SwiftUI !== null && SwiftUIModifiers !== null && (
+            // Liquid Glass capsule floating behind the transparent field.
+            <SwiftUI.Host
+              style={StyleSheet.absoluteFill}
+              colorScheme="dark"
+              pointerEvents="none"
+              useViewportSizeMeasurement
+            >
+              <SwiftUI.HStack
+                modifiers={[
+                  SwiftUIModifiers.frame({ maxWidth: 9999, maxHeight: 9999 }),
+                  SwiftUIModifiers.glassEffect({
+                    glass: { variant: "regular" },
+                    shape: "capsule",
+                  }),
+                ]}
+              >
+                <SwiftUI.Spacer />
+              </SwiftUI.HStack>
+            </SwiftUI.Host>
+          )}
+          <TextInput
+            style={[styles.input, SwiftUI !== null && styles.inputOnGlass]}
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Message the agent…"
+            placeholderTextColor="#8b949e"
+            multiline
+            autoCapitalize="none"
+            autoCorrect
+          />
+        </View>
+        {SwiftUI !== null ? (
+          <IconButton symbol="arrow.up" fallback="↑" onPress={sendDraft} accent />
+        ) : (
+          <Pressable style={styles.sendBtn} onPress={sendDraft}>
+            <Text style={styles.sendText}>↑</Text>
+          </Pressable>
+        )}
       </View>
     </KeyboardAvoidingView>
   );
@@ -165,23 +194,27 @@ const styles = StyleSheet.create({
   },
   toolTitle: { color: "#8b949e", fontSize: 12, fontWeight: "600", marginBottom: 2 },
   toolText: { color: "#8b949e", fontFamily: "monospace", fontSize: 11 },
+  // Floating composer: no bar background — the glass capsule and glass
+  // send circle hover over the conversation.
   inputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    padding: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     gap: 8,
-    backgroundColor: "#141414",
+    backgroundColor: "transparent",
   },
+  inputWrap: { flex: 1, justifyContent: "center" },
   input: {
-    flex: 1,
     color: "#c9d1d9",
-    backgroundColor: "#000000",
-    borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 9,
+    backgroundColor: "#141414",
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     maxHeight: 120,
     fontSize: 15,
   },
+  inputOnGlass: { backgroundColor: "transparent" },
   sendBtn: {
     width: 36,
     height: 36,
