@@ -15,6 +15,7 @@ export function onDismissAllKeyboards(fn: () => void): () => void {
 }
 
 export function dismissAllKeyboards() {
+  console.log(`[kb] dismissAllKeyboards, listeners=${listeners.size}`);
   Keyboard.dismiss();
   listeners.forEach((fn) => fn());
 }

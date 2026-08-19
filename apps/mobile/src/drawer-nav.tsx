@@ -13,6 +13,7 @@ export interface DrawerKit {
     style?: object;
     children?: React.ReactNode;
   }>;
+  useDrawerStatus?: typeof import("@react-navigation/drawer").useDrawerStatus;
 }
 
 export const drawerKit: DrawerKit | null = (() => {
@@ -25,6 +26,7 @@ export const drawerKit: DrawerKit | null = (() => {
     return {
       createDrawerNavigator: drawer.createDrawerNavigator,
       GestureHandlerRootView: gh.GestureHandlerRootView,
+      useDrawerStatus: drawer.useDrawerStatus,
     };
   } catch {
     return null;

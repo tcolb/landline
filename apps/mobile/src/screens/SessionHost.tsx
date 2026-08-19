@@ -13,10 +13,12 @@ import { IconButton } from "../components/IconButton";
 import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { Terminal } from "../components/Terminal";
 import { useSelection } from "../selection";
+import { dismissAllKeyboards } from "../kb";
+import { drawerKit } from "../drawer-nav";
 
 /** Bump on every UI change batch; shows in the dev bar so a stale bundle
  * is immediately visible on-device. */
-const JS_REV = "r27";
+const JS_REV = "r28";
 
 interface Props {
   cfg: ConnectionConfig;
@@ -27,7 +29,14 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
   const { selection, view, setView } = useSelection();
   return (
     <View style={styles.bar}>
-      <IconButton symbol="line.3.horizontal" fallback="☰" onPress={openDrawer} />
+      <IconButton
+        symbol="line.3.horizontal"
+        fallback="☰"
+        onPress={() => {
+          dismissAllKeyboards();
+          openDrawer();
+        }}
+      />
       <View style={styles.barCenter}>
         {selection?.chat ? (
           SwiftUI !== null && SwiftUIModifiers !== null ? (
@@ -37,8 +46,10 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
                 onSelectionChange={(v) => setView(v as "terminal" | "chat")}
                 modifiers={[
                   SwiftUIModifiers.pickerStyle("segmented"),
-                  // Stretch to the 44pt bar-button standard so the selector
-                  // and the glass circles read as one control row.
+                  // Segmented controls have a fixed intrinsic height that
+                  // frame() cannot stretch; large control size matches the
+                  // 44pt bar buttons.
+                  SwiftUIModifiers.controlSize("large"),
                   SwiftUIModifiers.frame({ width: 190, height: 44 }),
                 ]}
               >
@@ -74,6 +85,18 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
   );
 }
 
+/** Worklet-free fallback: drop keyboards whenever the drawer's nav state
+ * flips to open (covers gesture opens even if the progress worklet path
+ * fails). Rendered only when the drawer stack is available so the hook
+ * call is unconditional within it. */
+function DismissOnDrawerOpen() {
+  const status = drawerKit!.useDrawerStatus!();
+  React.useEffect(() => {
+    if (status === "open") dismissAllKeyboards();
+  }, [status]);
+  return null;
+}
+
 export function SessionHost({ cfg, openDrawer }: Props) {
   const { selection, view } = useSelection();
   // Inset padding, not SafeAreaView: SafeAreaView re-measures during the
@@ -83,6 +106,7 @@ export function SessionHost({ cfg, openDrawer }: Props) {
   const activeView = selection?.chat && view === "chat" ? "chat" : "terminal";
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      {drawerKit?.useDrawerStatus !== undefined && <DismissOnDrawerOpen />}
       <TopBar openDrawer={openDrawer} />
       {selection === null ? (
         <View style={styles.emptyWrap}>

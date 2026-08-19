@@ -67,7 +67,10 @@ function Scrim() {
   // not on mount and not mid-drag; dismiss the keyboard the moment the
   // card first moves off its docked position.
   useAnimatedReaction(
-    () => progress.value ?? 0,
+    () => {
+      "worklet";
+      return progress.value ?? 0;
+    },
     (value, previous) => {
       "worklet";
       if (previous === null || previous === value) return;
@@ -85,10 +88,10 @@ function Scrim() {
     const p = progress.value ?? 0;
     return { opacity: p * p * p };
   });
-  // Border ramps in fast: any displacement at all shows the card edge,
-  // fully invisible only at rest.
+  // Border snaps in at the first pixel of displacement: full strength by
+  // 2% progress, invisible only truly at rest.
   const borderStyle = k.useAnimatedStyle(() => ({
-    opacity: Math.min((progress.value ?? 0) * 6, 1),
+    opacity: Math.min((progress.value ?? 0) * 50, 1),
   }));
   const A = k.Animated.View;
   const fill = {
