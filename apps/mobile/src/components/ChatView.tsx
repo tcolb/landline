@@ -100,6 +100,11 @@ function NativeComposer({
             shape: "roundedRectangle",
             cornerRadius: BUBBLE_RADIUS,
           }),
+          // Bottom-anchor within the host: while RN's matchContents resize
+          // lags a frame behind SwiftUI's layout, the extra line overflows
+          // upward (hosting views don't clip) instead of shoving the send
+          // row below the clip — growth reads as instant.
+          m.frame({ maxWidth: 9999, maxHeight: 9999, alignment: "bottom" }),
         ]}
       >
         <S.TextField
