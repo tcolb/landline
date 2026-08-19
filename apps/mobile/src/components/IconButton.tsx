@@ -27,6 +27,9 @@ export function IconButton({ symbol, fallback, onPress, size = BAR_BUTTON_SIZE, 
     const modifiers = [
       m.buttonStyle(accent ? "glassProminent" : "glass"),
       m.buttonBorderShape("circle"),
+      // The glass pill sizes itself from label padding; pin the frame so
+      // every bar button lands on the same standard circle.
+      m.frame({ width: size, height: size }),
     ];
     if (accent) modifiers.push(m.tint("#238636"));
     return (

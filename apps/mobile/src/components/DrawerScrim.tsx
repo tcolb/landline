@@ -128,12 +128,14 @@ function BarFx({ children }: { children: React.ReactNode }) {
   const k = kit!;
   const progress = k.useDrawerProgress();
   // Depth treatment for the in-card bar: recede along z (scale down) and
-  // fade as the card is pulled away, return as it docks.
+  // fade as the card is pulled away, return as it docks. Front-loaded:
+  // the bar slides off-screen in the first third of the drag, so the
+  // whole effect must play out in that window to be visible at all.
   const style = k.useAnimatedStyle(() => {
-    const p = progress.value ?? 0;
+    const p = Math.min((progress.value ?? 0) * 3, 1);
     return {
-      opacity: 1 - p * 0.65,
-      transform: [{ scale: 1 - p * 0.1 }],
+      opacity: 1 - p * 0.85,
+      transform: [{ scale: 1 - p * 0.15 }],
     };
   });
   const A = k.Animated.View;

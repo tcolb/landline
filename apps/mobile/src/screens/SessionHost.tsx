@@ -15,7 +15,7 @@ import { useSelection } from "../selection";
 
 /** Bump on every UI change batch; shows in the dev bar so a stale bundle
  * is immediately visible on-device. */
-const JS_REV = "r18";
+const JS_REV = "r19";
 
 interface Props {
   cfg: ConnectionConfig;
