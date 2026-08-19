@@ -32,7 +32,9 @@ export function IconButton({ symbol, fallback, onPress, size = BAR_BUTTON_SIZE, 
     // The glass pill wraps the label plus system padding; pinning the
     // LABEL's frame (a frame outside the button just boxes it) makes
     // every bar button the same standard circle.
-    const labelFrame = [m.frame({ width: size * 0.5, height: size * 0.5 })];
+    // Pill = label frame + ~7pt system padding per side; this lands the
+    // visible circle on the full standard size.
+    const labelFrame = [m.frame({ width: size - 14, height: size - 14 })];
     return (
       <SwiftUI.Host style={{ width: size, height: size }} colorScheme="dark">
         <SwiftUI.Button onPress={onPress} modifiers={modifiers}>

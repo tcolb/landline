@@ -134,7 +134,7 @@ function RevealFx({ children }: { children: React.ReactNode }) {
     const p = progress.value ?? 0;
     return {
       opacity: 0.2 + p * 0.8,
-      transform: [{ scale: 0.92 + p * 0.08 }],
+      transform: [{ scale: 0.95 + p * 0.05 }],
     };
   });
   const A = k.Animated.View;
@@ -145,4 +145,23 @@ function RevealFx({ children }: { children: React.ReactNode }) {
  * plain passthrough when the drawer stack is unavailable. */
 export function DrawerRevealFx({ children }: { children: React.ReactNode }) {
   return kit ? <RevealFx>{children}</RevealFx> : <>{children}</>;
+}
+
+function BarFade({ children }: { children: React.ReactNode }) {
+  const k = kit!;
+  const progress = k.useDrawerProgress();
+  // The card's bar fades to fully invisible by ~60% of the drag, so there
+  // is a beat of blank card top before the bar leaves the screen.
+  const style = k.useAnimatedStyle(() => {
+    const p = progress.value ?? 0;
+    return { opacity: Math.max(0, 1 - p / 0.6) };
+  });
+  const A = k.Animated.View;
+  return <A style={style}>{children}</A>;
+}
+
+/** Fades the in-card top bar out ahead of the card's departure; a plain
+ * passthrough when the drawer stack is unavailable. */
+export function DrawerBarFade({ children }: { children: React.ReactNode }) {
+  return kit ? <BarFade>{children}</BarFade> : <>{children}</>;
 }
