@@ -4,6 +4,8 @@ import { Platform, ViewProps } from "react-native";
 
 export interface KeyInputProps extends ViewProps {
   focused: boolean;
+  /** Increment to re-request the keyboard (edge-triggered focus). */
+  focusNonce: number;
   onInsertText(event: { nativeEvent: { text: string } }): void;
   onDeleteBackward(): void;
 }

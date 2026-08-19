@@ -350,6 +350,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
   const [inputEpoch, setInputEpoch] = useState(0);
   /** iOS native key view focus (soft keyboard visibility). */
   const [kbFocused, setKbFocused] = useState(true);
+  const [focusNonce, setFocusNonce] = useState(1);
   const inputRef = useRef<TextInput>(null);
   const ctrlRef = useRef(false);
   ctrlRef.current = ctrl;
@@ -527,6 +528,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
       onPanResponderRelease: (_e, g) => {
         if (Math.abs(g.dy) < 6 && Math.abs(g.dx) < 6) {
           setKbFocused(true);
+          setFocusNonce((n) => n + 1);
           inputRef.current?.focus();
         }
       },
@@ -693,6 +695,7 @@ export function Terminal({ cfg, session, onBack }: Props) {
         <LandlineKeyInput
           style={styles.hiddenInput}
           focused={kbFocused}
+          focusNonce={focusNonce}
           onInsertText={(e) => {
             const text = e.nativeEvent.text;
             sendText(text === "\n" ? "\r" : text);

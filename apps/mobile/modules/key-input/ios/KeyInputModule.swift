@@ -20,6 +20,14 @@ public class KeyInputModule: Module {
       Prop("focused") { (view: KeyInputView, focused: Bool) in
         view.setFocused(focused)
       }
+
+      // Edge-triggered focus: increments re-request the keyboard even when
+      // `focused` never changed (level props can't re-fire).
+      Prop("focusNonce") { (view: KeyInputView, nonce: Int) in
+        if nonce > 0 {
+          view.setFocused(true)
+        }
+      }
     }
   }
 }
@@ -54,12 +62,29 @@ class KeyInputView: ExpoView, UIKeyInput {
   var smartDashesType: UITextSmartDashesType = .no
   var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
 
+  // becomeFirstResponder silently fails before the view joins a window
+  // (exactly when the mount-time prop applies); remember intent and retry
+  // on window attach.
+  private var wantsFocus = false
+
   func setFocused(_ focused: Bool) {
+    wantsFocus = focused
     DispatchQueue.main.async {
       if focused {
-        self.becomeFirstResponder()
+        if self.window != nil {
+          self.becomeFirstResponder()
+        }
       } else {
         self.resignFirstResponder()
+      }
+    }
+  }
+
+  public override func didMoveToWindow() {
+    super.didMoveToWindow()
+    if wantsFocus && window != nil {
+      DispatchQueue.main.async {
+        self.becomeFirstResponder()
       }
     }
   }
