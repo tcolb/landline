@@ -86,6 +86,9 @@ function NativeComposer({
   const [draft, setDraft] = useState("");
   const [contentH, setContentH] = useState(INPUT_LINE);
   const input = useRef<TextInput>(null);
+  // iOS multiline inputs fire spurious onContentSizeChange on blur/keyboard
+  // dismissal; the bubble must NEVER resize except while actively editing.
+  const editing = useRef(false);
   const send = () => {
     const text = draft.trim();
     if (text === "") return;
@@ -121,7 +124,15 @@ function NativeComposer({
         style={[styles.nativeInput, { height: inputH }]}
         value={draft}
         onChangeText={setDraft}
-        onContentSizeChange={(e) => setContentH(e.nativeEvent.contentSize.height)}
+        onContentSizeChange={(e) => {
+          if (editing.current) setContentH(e.nativeEvent.contentSize.height);
+        }}
+        onFocus={() => {
+          editing.current = true;
+        }}
+        onBlur={() => {
+          editing.current = false;
+        }}
         placeholder={`Ask ${agentName}`}
         placeholderTextColor="#8b949e"
         multiline

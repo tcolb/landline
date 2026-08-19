@@ -18,7 +18,7 @@ import { drawerKit } from "../drawer-nav";
 
 /** Bump on every UI change batch; shows in the dev bar so a stale bundle
  * is immediately visible on-device. */
-const JS_REV = "r44";
+const JS_REV = "r45";
 
 interface Props {
   cfg: ConnectionConfig;
