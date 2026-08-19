@@ -120,6 +120,31 @@ Later bridges, not core: an ACP session type (chat-altitude clients), AHP
 alignment for multi-client turn semantics, and possibly the tmux
 control-mode dialect so terminals that already speak it can attach natively.
 
+### Tracked upstream: libghostty binary snapshot format (GHOSTSNP)
+
+ghostty main now carries a binary terminal-snapshot codec
+(`include/ghostty/vt/snapshot.h`, format v1): a CRC32C-protected record
+stream encoding complete terminal state — including unfinished VT parser
+input — with a `READY` marker after the renderable prefix and scrollback
+history pages ordered for incremental prepend. As of this writing it is
+NOT in the released Rust crate (0.2.1) and the format explicitly carries
+no binary-compatibility guarantee, so we track rather than adopt.
+
+When it ships stable, three adoption points, all additive:
+
+1. **Third negotiated attach encoding** for clients that embed
+   libghostty (incl. potentially our app via their WASM build): superior
+   to the VT-dump reconstruction because it restores mid-escape-sequence
+   parser state exactly, where escape replay can glitch.
+2. **Scrollback transfer**: the render-at-READY-then-backfill-history
+   decode shape is exactly the on-demand scrollback protocol we want.
+3. **Retention/persistence**: snapshot-to-disk so screen state and
+   scrollback survive daemon restarts (process state still dies; screen
+   state need not).
+
+JSON frames stay the thin-client baseline and escape-code bytes mode the
+universal shim; GHOSTSNP would slot in via `hello` feature negotiation.
+
 ## Architecture
 
 ```
