@@ -89,6 +89,11 @@ function NativeComposer({
   // iOS multiline inputs fire spurious onContentSizeChange on blur/keyboard
   // dismissal; the bubble must NEVER resize except while actively editing.
   const editing = useRef(false);
+  // Fabric's onContentSizeChange is unreliable — a hidden Text twin with
+  // identical metrics measures the draft instead.
+  const onMeasure = (h: number) => {
+    if (editing.current) setContentH(Math.ceil(h));
+  };
   const send = () => {
     const text = draft.trim();
     if (text === "") return;
@@ -124,9 +129,6 @@ function NativeComposer({
         style={[styles.nativeInput, { height: inputH }]}
         value={draft}
         onChangeText={setDraft}
-        onContentSizeChange={(e) => {
-          if (editing.current) setContentH(e.nativeEvent.contentSize.height);
-        }}
         onFocus={() => {
           editing.current = true;
         }}
@@ -140,6 +142,16 @@ function NativeComposer({
         autoCapitalize="none"
         autoCorrect
       />
+      {/* Invisible measurer: same font, line height, and wrap width as the
+          input (UITextView adds 5pt line-fragment padding per side, mirrored
+          here) — its layout height is the input's content height. */}
+      <Text
+        style={styles.measurer}
+        pointerEvents="none"
+        onLayout={(e) => onMeasure(e.nativeEvent.layout.height)}
+      >
+        {draft.length > 0 ? draft + "\u200b" : "X"}
+      </Text>
       <View style={styles.sendSeat}>
         <S.Host style={{ width: SEND_DIAMETER, height: SEND_DIAMETER }} colorScheme="dark">
           <S.Image
@@ -431,6 +443,15 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: 0,
     textAlignVertical: "top",
+  },
+  measurer: {
+    position: "absolute",
+    left: 16 + 5,
+    right: 16 + 5,
+    top: 0,
+    opacity: 0,
+    fontSize: 18,
+    lineHeight: INPUT_LINE,
   },
   sendSeat: { position: "absolute", right: SEND_GAP, bottom: SEND_GAP },
   // Fallback composer.
