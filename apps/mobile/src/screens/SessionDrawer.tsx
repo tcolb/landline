@@ -8,7 +8,7 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ConnectionConfig } from "../client";
 import { DrawerRevealFx } from "../components/DrawerScrim";
-import { GlassPillButton } from "../components/IconButton";
+import { GlassPillButton, IconButton } from "../components/IconButton";
 import { SessionInfo } from "../proto";
 import { killSession, useSessions } from "../sessions";
 
@@ -22,10 +22,10 @@ interface Props {
   selected: string | null;
   onSelect(sel: SessionSelection): void;
   onSpawn(): void;
-  onDisconnect(): void;
+  onSettings(): void;
 }
 
-export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }: Props) {
+export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onSettings }: Props) {
   const sessions = useSessions(cfg);
   const kill = useMutation({ mutationFn: (id: string) => killSession(cfg, id) });
 
@@ -70,9 +70,9 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
           </Text>
         }
       />
-      <Pressable onPress={onDisconnect} style={styles.footer}>
-        <Text style={styles.dim}>disconnect</Text>
-      </Pressable>
+      <View style={styles.gear}>
+        <IconButton symbol="gearshape" fallback="⚙" onPress={onSettings} />
+      </View>
       <View style={styles.fab}>
         <GlassPillButton label="New Session" symbol="plus" onPress={onSpawn} />
       </View>
@@ -84,6 +84,7 @@ export function SessionDrawer({ cfg, selected, onSelect, onSpawn, onDisconnect }
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000000" },
   fab: { position: "absolute", right: 14, bottom: 48 },
+  gear: { position: "absolute", left: 14, bottom: 52 },
   header: {
     flexDirection: "row",
     alignItems: "center",

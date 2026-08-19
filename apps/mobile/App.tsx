@@ -18,6 +18,7 @@ import { useSelection } from "./src/selection";
 import { SessionDrawer } from "./src/screens/SessionDrawer";
 import { SessionHost } from "./src/screens/SessionHost";
 import { SessionsScreen } from "./src/screens/SessionsScreen";
+import { SettingsScreen } from "./src/screens/SettingsScreen";
 import { SpawnScreen } from "./src/screens/SpawnScreen";
 import { TerminalScreen } from "./src/screens/TerminalScreen";
 import { useConnection } from "./src/store";
@@ -28,6 +29,7 @@ export type RootStackParams = {
   Connect: undefined;
   Sessions: undefined;
   Spawn: undefined;
+  Settings: undefined;
   Terminal: { session: string; chat?: boolean };
 };
 
@@ -38,13 +40,7 @@ const Drawer = drawerKit ? drawerKit.createDrawerNavigator() : null;
 
 /** Claude-app-style layout: main scene slides right revealing the session
  * drawer; the displaced scene keeps a rounded, bordered edge. */
-function DrawerMain({
-  cfg,
-  onDisconnect,
-}: {
-  cfg: ConnectionConfig;
-  onDisconnect(): void;
-}) {
+function DrawerMain({ cfg }: { cfg: ConnectionConfig }) {
   const { selection, setSelection } = useSelection();
   const screenRadius = useScreenRadius();
   const D = Drawer!;
@@ -86,7 +82,10 @@ function DrawerMain({
             props.navigation.closeDrawer();
             navigationRef.navigate("Spawn");
           }}
-          onDisconnect={onDisconnect}
+          onSettings={() => {
+            props.navigation.closeDrawer();
+            navigationRef.navigate("Settings");
+          }}
         />
       )}
     >
@@ -221,9 +220,7 @@ export default function App() {
             ) : Drawer !== null ? (
               <Stack.Navigator>
                 <Stack.Screen name="Sessions" options={{ headerShown: false }}>
-                  {() => (
-                    <DrawerMain cfg={config} onDisconnect={() => setConnected(false)} />
-                  )}
+                  {() => <DrawerMain cfg={config} />}
                 </Stack.Screen>
                 <Stack.Screen
                   name="Spawn"
@@ -240,6 +237,14 @@ export default function App() {
                         props.navigation.goBack();
                       }}
                     />
+                  )}
+                </Stack.Screen>
+                <Stack.Screen
+                  name="Settings"
+                  options={{ presentation: "modal", title: "Settings" }}
+                >
+                  {() => (
+                    <SettingsScreen cfg={config} onDisconnect={() => setConnected(false)} />
                   )}
                 </Stack.Screen>
                 <Stack.Screen name="Terminal" options={{ headerShown: false }}>

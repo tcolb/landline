@@ -8,7 +8,8 @@
 
 import { Canvas, LinearGradient, Rect, vec } from "@shopify/react-native-skia";
 import React from "react";
-import { Dimensions, Keyboard, StyleSheet } from "react-native";
+import { Dimensions, StyleSheet } from "react-native";
+import { dismissAllKeyboards } from "../kb";
 import { useScreenRadius } from "../screen-radius";
 
 const kit: {
@@ -39,10 +40,6 @@ const kit: {
   }
 })();
 
-function dismissKeyboard() {
-  Keyboard.dismiss();
-}
-
 /** Light impact when the drawer settles open or closed. Guarded: no-op
  * on binaries built before expo-haptics was added. */
 const settleHaptic = (() => {
@@ -71,7 +68,7 @@ function Scrim() {
       "worklet";
       if (previous === null || previous === value) return;
       if (previous === 0 && value > 0) {
-        k.runOnJS(dismissKeyboard)();
+        k.runOnJS(dismissAllKeyboards)();
       }
       if ((value === 1 && previous < 1) || (value === 0 && previous > 0)) {
         k.runOnJS(settleHaptic)();

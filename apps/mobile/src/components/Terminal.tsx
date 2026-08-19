@@ -30,6 +30,7 @@ import {
 } from "react-native";
 import { LandlineKeyInput } from "../../modules/key-input";
 import { AttachHandle, attachFrames, ConnectionConfig } from "../client";
+import { onDismissAllKeyboards } from "../kb";
 import { stats } from "../stats";
 import {
   CellData,

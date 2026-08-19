@@ -10,12 +10,13 @@ import { ConnectionConfig } from "../client";
 import { ChatView } from "../components/ChatView";
 import { DrawerScrim } from "../components/DrawerScrim";
 import { IconButton } from "../components/IconButton";
+import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 import { Terminal } from "../components/Terminal";
 import { useSelection } from "../selection";
 
 /** Bump on every UI change batch; shows in the dev bar so a stale bundle
  * is immediately visible on-device. */
-const JS_REV = "r24";
+const JS_REV = "r25";
 
 interface Props {
   cfg: ConnectionConfig;
@@ -29,6 +30,20 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
       <IconButton symbol="line.3.horizontal" fallback="☰" onPress={openDrawer} />
       <View style={styles.barCenter}>
         {selection?.chat ? (
+          SwiftUI !== null && SwiftUIModifiers !== null ? (
+            <SwiftUI.Host style={{ width: 190, height: 32 }} colorScheme="dark">
+              <SwiftUI.Picker
+                selection={view}
+                onSelectionChange={(v) => setView(v as "terminal" | "chat")}
+                modifiers={[SwiftUIModifiers.pickerStyle("segmented")]}
+              >
+                <SwiftUI.Text modifiers={[SwiftUIModifiers.tag("terminal")]}>
+                  terminal
+                </SwiftUI.Text>
+                <SwiftUI.Text modifiers={[SwiftUIModifiers.tag("chat")]}>chat</SwiftUI.Text>
+              </SwiftUI.Picker>
+            </SwiftUI.Host>
+          ) : (
           <View style={styles.segments}>
             {(["terminal", "chat"] as const).map((v) => (
               <Pressable
@@ -40,6 +55,7 @@ function TopBar({ openDrawer }: { openDrawer(): void }) {
               </Pressable>
             ))}
           </View>
+          )
         ) : (
           <Text style={styles.title}>{selection ? selection.id : "landline"}</Text>
         )}
