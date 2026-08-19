@@ -84,6 +84,10 @@ export function ChatView({ cfg, session }: Props) {
   // List clearance under the lifted composer: single relayout per keyboard
   // transition (not per-frame), content just scrolls up behind it.
   const [kbClearance, setKbClearance] = useState(0);
+  // Measured bubble size for the glass layer: an explicit host frame keeps
+  // SwiftUI's drawing exactly bubble-sized (viewport measurement proposes
+  // the whole screen, and hosting views do not clip).
+  const [bubbleSize, setBubbleSize] = useState({ w: 0, h: 0 });
   useEffect(() => {
     if (Platform.OS !== "ios" || kbKit === null) return;
     const show = Keyboard.addListener("keyboardWillShow", (e) => {
@@ -200,23 +204,32 @@ export function ChatView({ cfg, session }: Props) {
       />
       <ComposerLiftMaybe>
       <View style={styles.inputRow}>
-        <View style={[styles.bubbleWrap, SwiftUI === null && styles.bubbleFallback]}>
-          {SwiftUI !== null && SwiftUIModifiers !== null && (
-            // Liquid Glass panel floating behind the transparent field; the
-            // wrapper's minHeight keeps the fill measurable keyboard-closed.
+        <View
+          style={[styles.bubbleWrap, SwiftUI === null && styles.bubbleFallback]}
+          onLayout={(e) =>
+            setBubbleSize({
+              w: e.nativeEvent.layout.width,
+              h: e.nativeEvent.layout.height,
+            })
+          }
+        >
+          {SwiftUI !== null && SwiftUIModifiers !== null && bubbleSize.w > 0 && (
+            // Liquid Glass panel behind the transparent field, sized to the
+            // measured bubble.
             <SwiftUI.Host
-              style={StyleSheet.absoluteFill}
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                width: bubbleSize.w,
+                height: bubbleSize.h,
+              }}
               colorScheme="dark"
               pointerEvents="none"
-              useViewportSizeMeasurement
             >
               <SwiftUI.HStack
                 modifiers={[
-                  SwiftUIModifiers.frame({
-                    maxWidth: 9999,
-                    maxHeight: 9999,
-                    minHeight: 80,
-                  }),
+                  SwiftUIModifiers.frame({ maxWidth: 9999, maxHeight: 9999 }),
                   SwiftUIModifiers.glassEffect({
                     glass: { variant: "regular" },
                     shape: "roundedRectangle",
