@@ -1,10 +1,11 @@
-// Circular bar button with a real SF Symbol — the top-bar control idiom
-// of the genre apps (translucent circle, symbol glyph). SwiftUI-backed on
-// iOS; text-glyph fallback elsewhere / on pre-module binaries.
+// Circular glass bar button with a real SF Symbol — the iOS 26 top-bar
+// control idiom (Liquid Glass pill, symbol glyph). A full SwiftUI Button
+// so the glass material and press shimmer are the system's own; falls
+// back to a flat circle on Android / pre-module binaries.
 
 import React from "react";
 import { Pressable, StyleSheet, Text } from "react-native";
-import { SwiftUI } from "../native-ui";
+import { SwiftUI, SwiftUIModifiers } from "../native-ui";
 
 interface Props {
   /** SF Symbol name, e.g. "line.3.horizontal", "plus". */
@@ -16,23 +17,26 @@ interface Props {
   accent?: boolean;
 }
 
-export function IconButton({ symbol, fallback, onPress, size = 32, accent }: Props) {
-  const inner =
-    SwiftUI !== null ? (
-      <SwiftUI.Host
-        style={{ width: size * 0.6, height: size * 0.6 }}
-        colorScheme="dark"
-        pointerEvents="none"
-      >
-        <SwiftUI.Image
-          systemName={symbol as never}
-          size={size * 0.5}
-          color={accent ? "#ffffff" : "#c9d1d9"}
-        />
+export function IconButton({ symbol, fallback, onPress, size = 34, accent }: Props) {
+  if (SwiftUI !== null && SwiftUIModifiers !== null) {
+    const m = SwiftUIModifiers;
+    const modifiers = [
+      m.buttonStyle(accent ? "glassProminent" : "glass"),
+      m.buttonBorderShape("circle"),
+    ];
+    if (accent) modifiers.push(m.tint("#238636"));
+    return (
+      <SwiftUI.Host style={{ width: size, height: size }} colorScheme="dark">
+        <SwiftUI.Button onPress={onPress} modifiers={modifiers}>
+          <SwiftUI.Image
+            systemName={symbol as never}
+            size={size * 0.44}
+            color={accent ? "#ffffff" : "#e6edf3"}
+          />
+        </SwiftUI.Button>
       </SwiftUI.Host>
-    ) : (
-      <Text style={styles.glyph}>{fallback}</Text>
     );
+  }
   return (
     <Pressable
       onPress={onPress}
@@ -44,7 +48,7 @@ export function IconButton({ symbol, fallback, onPress, size = 32, accent }: Pro
         pressed && styles.pressed,
       ]}
     >
-      {inner}
+      <Text style={styles.glyph}>{fallback}</Text>
     </Pressable>
   );
 }

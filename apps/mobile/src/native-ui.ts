@@ -16,3 +16,15 @@ export const SwiftUI: SwiftUINamespace | null = (() => {
     return null;
   }
 })();
+
+export type SwiftUIModifiersNamespace = typeof import("@expo/ui/swift-ui/modifiers");
+
+export const SwiftUIModifiers: SwiftUIModifiersNamespace | null = (() => {
+  if (SwiftUI === null) return null;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require("@expo/ui/swift-ui/modifiers") as SwiftUIModifiersNamespace;
+  } catch {
+    return null;
+  }
+})();
